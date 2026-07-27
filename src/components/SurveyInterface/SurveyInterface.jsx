@@ -5,6 +5,17 @@ import { toast } from 'sonner';
 import ArrowButton from '../ArrowButton/ArrowButton';
 import './SurveyInterface.css';
 
+// Staff can edit a survey template at any time, including shortening it. A
+// builder who was mid-way through the longer version has their position saved
+// in localStorage, which outlives a hard refresh — so a restored index can
+// point past the end of the current question list. Keep every index in range.
+export const clampQuestionIndex = (index, questionCount) => {
+  const maxIndex = Math.max(questionCount - 1, 0);
+  const parsed = Math.trunc(Number(index));
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.min(parsed, maxIndex);
+};
+
 const SurveyInterface = ({ taskId, dayNumber, cohort, surveyType = 'weekly', onComplete, isCompleted = false, isLastTask = false, isPreviewMode = false }) => {
   const token = useAuthStore((s) => s.token);
   const user = useAuthStore((s) => s.user);
@@ -76,6 +87,16 @@ const SurveyInterface = ({ taskId, dayNumber, cohort, surveyType = 'weekly', onC
   const currentQuestion = questions[currentQuestionIndex];
   const totalQuestions = questions.length;
 
+  // Safety net for every path that can leave the cursor out of range without
+  // going through the localStorage restore above — e.g. a surveyType change
+  // swaps in a shorter question set while the index stays in component state.
+  useEffect(() => {
+    const safeIndex = clampQuestionIndex(currentQuestionIndex, totalQuestions);
+    if (safeIndex !== currentQuestionIndex) {
+      setCurrentQuestionIndex(safeIndex);
+    }
+  }, [currentQuestionIndex, totalQuestions]);
+
   // Load existing feedback and localStorage progress (waits for template to resolve first)
   useEffect(() => {
     if (!taskId || !token || !templateLoaded) return;
@@ -123,8 +144,19 @@ const SurveyInterface = ({ taskId, dayNumber, cohort, surveyType = 'weekly', onC
           if (savedProgress) {
             try {
               const { responses: savedResponses, currentIndex } = JSON.parse(savedProgress);
-              setResponses(savedResponses || {});
-              setCurrentQuestionIndex(currentIndex || 0);
+              // A saved index past the end means this progress was recorded
+              // against a longer version of the template — its answers are keyed
+              // to questions that no longer exist, so start clean rather than
+              // restoring a position the current survey can't render.
+              if (Number(currentIndex) > questions.length - 1) {
+                console.warn('Discarding survey progress saved against an older template version');
+                localStorage.removeItem(getStorageKey());
+                setResponses({});
+                setCurrentQuestionIndex(0);
+              } else {
+                setResponses(savedResponses || {});
+                setCurrentQuestionIndex(clampQuestionIndex(currentIndex, questions.length));
+              }
             } catch (e) {
               console.warn('Failed to parse saved survey progress');
             }
@@ -362,6 +394,20 @@ const SurveyInterface = ({ taskId, dayNumber, cohort, surveyType = 'weekly', onC
   };
 
   if (isLoading) {
+    return (
+      <div className="survey-interface survey-interface--loading">
+        <div className="survey-interface__loading">
+          <FaSpinner className="survey-interface__loading-icon" />
+          <p>Loading survey...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Belt-and-suspenders: never deref an out-of-range question. There is no
+  // ErrorBoundary above this component, so a throw here blanks the whole
+  // Learning page. The clamping effect re-renders us in range next tick.
+  if (!currentQuestion) {
     return (
       <div className="survey-interface survey-interface--loading">
         <div className="survey-interface__loading">
