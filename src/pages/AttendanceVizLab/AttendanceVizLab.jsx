@@ -15,6 +15,10 @@ import useAuthStore from '../../stores/authStore';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:7001';
 const DEFAULT_COHORT_NAME = 'L1 - July 2026';
+const DATA_DICTIONARY_URL = 'https://data-dictionary-866060457933.us-central1.run.app/';
+// Dictionary metrics (bedrock.dd_metrics) that back this page — definitions are
+// pulled live so they're never hardcoded. In requested display order.
+const DICTIONARY_METRIC_IDS = [165, 155, 154, 105]; // funnel, enrollment, active/withdrawn, attendance
 
 const INK = '#1E1E1E';
 const INK_MUTED = '#898781';
@@ -37,7 +41,7 @@ const STATUS = {
 // Sequential blue ramp for the heatmap (steps light→dark)
 const HEAT_RAMP = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95'];
 
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+const WEEK_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const weekdayOf = (dateStr) => new Date(`${dateStr}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short' });
 
 const DENOM_OPTIONS = [
@@ -57,6 +61,14 @@ const SANKEY_NODE_COLORS = {
   'Attends under 75%': '#86b6ef',
   // Signed-and-accepted side inflow — legitimate (blue), not a gray problem
   'Accepted — other cohort': STAGE_RAMP[1],
+  // Daily attendance Sankey (per-day modal) — status palette + counted rollup
+  'On the roster': STAGE_RAMP[3],
+  'Present': STATUS.present,
+  'Late': STATUS.late,
+  'Excused': STATUS.excused,
+  'Absent (no check-in)': STATUS.absent,
+  'Counted present': '#006300',
+  'Counted absent': '#a51f1f',
 };
 
 const SankeyNode = ({ x, y, width, height, payload, containerWidth }) => {
@@ -154,21 +166,42 @@ const DailyTooltip = ({ active, payload, denomShort }) => {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   return (
+    (() => {
+      const extraAbsent = d.basisAbsent - (d.absentNames?.length || 0); // present only on initial/ever bases
+      return (
+        <div style={tooltipStyle}>
+          <div className="font-semibold text-[#1E1E1E]">{d.date} — {d.basisRate}% of {denomShort}</div>
+          <div className="text-[#1E1E1E]">Present {d.present} · Late {d.late} · Excused {d.excused} · Absent {d.basisAbsent}</div>
+          <div className="text-slate-500 text-xs">sums to {d.basisDenom} {denomShort}</div>
+          {d.excused > 0 && (
+            <div className="mt-1">
+              <div className="text-xs font-semibold text-slate-500">Excused ({d.excused}) — counted absent</div>
+              <NamesList names={d.excusedNames} max={8} />
+            </div>
+          )}
+          {d.basisAbsent > 0 && (
+            <div className="mt-1">
+              <div className="text-xs font-semibold text-slate-500">No check-in ({d.basisAbsent})</div>
+              <NamesList names={d.absentNames} max={8} />
+              {extraAbsent > 0 && <div className="text-xs text-slate-400">+ {extraAbsent} not on the active roster that day</div>}
+            </div>
+          )}
+        </div>
+      );
+    })()
+  );
+};
+
+const WeeklyBarTooltip = ({ active, payload, denomShort }) => {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
     <div style={tooltipStyle}>
-      <div className="font-semibold text-[#1E1E1E]">{d.date} — {d.basisRate}% of {denomShort}</div>
-      <div className="text-[#1E1E1E]">Present {d.present} · Late {d.late} · of {d.basisDenom}</div>
-      {d.excusedNames?.length > 0 && (
-        <div className="mt-1">
-          <div className="text-xs font-semibold text-slate-500">Excused ({d.excused}) — counted absent</div>
-          <NamesList names={d.excusedNames} max={8} />
-        </div>
-      )}
-      {d.absentNames?.length > 0 && (
-        <div className="mt-1">
-          <div className="text-xs font-semibold text-slate-500">No check-in ({d.absentNames.length})</div>
-          <NamesList names={d.absentNames} max={8} />
-        </div>
-      )}
+      <div className="font-semibold text-[#1E1E1E]">{d.label} — {d.basisRate}% of {denomShort}</div>
+      <div className="text-slate-500 text-xs">Pooled across {d.classDays} class {d.classDays === 1 ? 'day' : 'days'} (builder-days)</div>
+      <div className="text-[#1E1E1E] mt-1">Present {d.present} · Late {d.late}</div>
+      <div className="text-[#1E1E1E]">Excused {d.excused} (absent) · No check-in {d.basisAbsent}</div>
+      <div className="text-slate-500">of {d.basisDenom} builder-days</div>
     </div>
   );
 };
@@ -219,6 +252,73 @@ const DenomToggle = ({ basis, setBasis, view }) => (
   </div>
 );
 
+// Build a one-day attendance Sankey: the day's active roster → present / late /
+// excused / absent → counted-present vs counted-absent (reconciles to the rate).
+const buildDailySankey = (d) => {
+  const NAMES = ['On the roster', 'Present', 'Late', 'Excused', 'Absent (no check-in)', 'Counted present', 'Counted absent'];
+  const raw = [
+    { source: 0, target: 1, value: d.present },
+    { source: 0, target: 2, value: d.late },
+    { source: 0, target: 3, value: d.excused },
+    { source: 0, target: 4, value: d.absent },
+    { source: 1, target: 5, value: d.present },
+    { source: 2, target: 5, value: d.late },
+    { source: 3, target: 6, value: d.excused },
+    { source: 4, target: 6, value: d.absent },
+  ].filter(l => l.value > 0);
+  const used = [...new Set(raw.flatMap(l => [l.source, l.target]))].sort((a, b) => a - b);
+  const idx = new Map(used.map((o, i) => [o, i]));
+  const nodes = used.map(i => ({ name: NAMES[i] }));
+  const links = raw.map(l => ({ source: idx.get(l.source), target: idx.get(l.target), value: l.value }));
+  const nodeInfo = {
+    'On the roster': { def: `Active enrollment on ${d.date} — the day's denominator (${d.denom}).` },
+    'Present': { def: 'Checked in on time.', names: d.presentNames || [] },
+    'Late': { def: 'Checked in late (still counts as attended).', names: d.lateNames || [] },
+    'Excused': { def: 'Gave notice — but counts as ABSENT in the rate.', names: d.excusedNames || [] },
+    'Absent (no check-in)': { def: 'On the roster, no check-in that day.', names: d.absentNames || [] },
+    'Counted present': { def: '(present + late) — the numerator of the day’s attendance rate.' },
+    'Counted absent': { def: 'excused + no check-in — everyone not counted present.' },
+  };
+  return { nodes, links, nodeInfo };
+};
+
+const DailyAttendanceModal = ({ day, onClose }) => {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  if (!day) return null;
+  const { nodes, links, nodeInfo } = buildDailySankey(day);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-1">
+          <div>
+            <h3 className="text-lg font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+              {day.day}, {day.date} — {day.rate}% attendance
+            </h3>
+            <p className="text-sm text-slate-500">
+              {day.present + day.late} of {day.denom} active builders counted present · {day.excused} excused (absent) · {day.absent} no check-in
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-[#1E1E1E] text-2xl leading-none px-2">×</button>
+        </div>
+        <div style={{ width: '100%', height: 340 }}>
+          <ResponsiveContainer>
+            <Sankey data={{ nodes, links }} node={<SankeyNode />} nodePadding={28}
+              margin={{ top: 12, right: 150, bottom: 12, left: 12 }}
+              link={{ stroke: '#cbd5e1', strokeOpacity: 0.45 }}>
+              <Tooltip trigger="hover" content={<SankeyTooltip nodeInfo={nodeInfo} />} />
+            </Sankey>
+          </ResponsiveContainer>
+        </div>
+        <p className="text-xs text-slate-400 mt-2">Hover any node for the builders in it. Excused counts as absent in the rate; the two right-hand nodes are the rate's numerator and its complement.</p>
+      </div>
+    </div>
+  );
+};
+
 const heatColor = (rate) => {
   // 75% → lightest step, 100% → darkest
   const t = Math.max(0, Math.min(1, (rate - 75) / 25));
@@ -228,8 +328,8 @@ const heatInk = (rate) => ((rate - 75) / 25 >= 0.5 ? '#ffffff' : '#0b0b0b');
 
 const OPTIONS_NAV = [
   { id: 'option-a', label: 'A · Funnel (Sankey)' },
-  { id: 'option-b', label: 'B · Enrollment + attendance over time' },
-  { id: 'option-c', label: 'C · Daily coach view' },
+  { id: 'option-b', label: 'B · Attendance rate over time' },
+  { id: 'option-c', label: 'C · Attendance bars (week / day)' },
   { id: 'option-d', label: 'D · Retro KPIs + heatmap' },
 ];
 
@@ -285,6 +385,9 @@ const AttendanceVizLab = () => {
       day: weekdayOf(d.date),
       attended: d.present + d.late,
     }));
+    // Weekday columns come from the actual class days (curriculum), so a Mon–Thu
+    // cohort shows only Mon–Thu — no always-empty Friday column.
+    const weekdays = WEEK_ORDER.filter(wd => dailyBase.some(d => d.day === wd));
 
     const weeklyBase = weekly.map(w => ({
       ...w,
@@ -425,7 +528,7 @@ const AttendanceVizLab = () => {
     }
 
     return {
-      weeklyBase, dailyBase, lastWeek, prevWeek, nodes, links, nodeInfo,
+      weeklyBase, dailyBase, weekdays, lastWeek, prevWeek, nodes, links, nodeInfo,
       activeDelta, excusedDelta, retention, notes, funnel, cohort,
     };
   }, [data]);
@@ -434,6 +537,19 @@ const AttendanceVizLab = () => {
   const [basisB, setBasisB] = useState('active');
   const [basisC, setBasisC] = useState('active');
   const [basisD, setBasisD] = useState('active');
+  const [cMode, setCMode] = useState('week'); // Option C: 'week' aggregate bars | 'day' daily bars
+  const [cWeek, setCWeek] = useState(null); // Option C daily view: selected week (null → latest)
+  const [modalDay, setModalDay] = useState(null); // heatmap cell → daily attendance Sankey
+  const [definitions, setDefinitions] = useState(null); // live from bedrock.dd_metrics
+
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API_BASE}/api/admin/dashboard/dictionary-metrics?ids=${DICTIONARY_METRIC_IDS.join(',')}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.json())
+      .then(d => { if (d.success) setDefinitions(d.metrics); })
+      .catch(() => {});
+  }, [token]);
 
   // Project the basis-independent base rows onto a chosen denominator.
   const projectBasis = (basis) => {
@@ -454,11 +570,23 @@ const AttendanceVizLab = () => {
     const currentWeekRows = lastWeek ? dailyRows.filter(d => d.week === lastWeek.week) : [];
     const heatmap = weeklyRows.map(w => ({
       week: w.label,
-      cells: WEEKDAYS.map(day => dailyRows.find(d => d.week === w.week && d.day === day) || null),
+      cells: view.weekdays.map(day => dailyRows.find(d => d.week === w.week && d.day === day) || null),
     }));
     const denomMax = Math.max(75, Math.ceil(Math.max(0, ...dailyRows.map(d => d.basisDenom)) / 25) * 25);
+    // Weekly aggregate bars — pooled builder-days per week (sum across class days)
+    const wMap = new Map();
+    for (const d of dailyRows) {
+      let w = wMap.get(d.week);
+      if (!w) { w = { week: d.week, label: `Wk ${d.week}`, present: 0, late: 0, excused: 0, basisAbsent: 0, basisDenom: 0, classDays: 0 }; wMap.set(d.week, w); }
+      w.present += d.present; w.late += d.late; w.excused += d.excused;
+      w.basisAbsent += d.basisAbsent; w.basisDenom += d.basisDenom; w.classDays += 1;
+    }
+    const weeklyBars = [...wMap.values()].sort((a, b) => a.week - b.week)
+      .map(w => ({ ...w, day: w.label, basisRate: pct(w.present + w.late, w.basisDenom) }));
+    const weeklyBarMax = Math.max(100, Math.ceil(Math.max(0, ...weeklyBars.map(w => w.basisDenom)) / 100) * 100);
     return {
-      weeklyRows, dailyRows, currentWeekRows, heatmap, lastWeek, denomMax,
+      weeklyRows, dailyRows, currentWeekRows, heatmap, lastWeek, denomMax, weeklyBars, weeklyBarMax,
+      availableWeeks: weeklyBars.map(w => w.week),
       lastIdx: weeklyRows.length - 1,
       rateDelta: lastWeek && prevWeek ? lastWeek.basisRate - prevWeek.basisRate : null,
       denomShort: DENOM_OPTIONS.find(o => o.key === basis).short,
@@ -468,6 +596,9 @@ const AttendanceVizLab = () => {
   const projB = projectBasis(basisB);
   const projC = projectBasis(basisC);
   const projD = projectBasis(basisD);
+  // Option C daily view: which week (default latest), and that week's day rows
+  const cWeekEff = cWeek ?? (projC?.lastWeek?.week ?? null);
+  const cDayRows = projC ? projC.dailyRows.filter(d => d.week === cWeekEff) : [];
 
   return (
     <div className="min-h-screen bg-[#EFEFEF]">
@@ -510,29 +641,40 @@ const AttendanceVizLab = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-8 py-6 space-y-6">
-        {/* Aligned definitions */}
+        {/* Definitions — pulled LIVE from the Data Dictionary (bedrock.dd_metrics),
+            the source of truth. Editing a definition there updates this page. */}
         <section className="bg-white rounded-lg border border-[#E3E3E3] p-6">
-          <h2 className="text-sm font-bold uppercase tracking-wide text-[#1E1E1E] mb-3">
-            Aligned definitions (data-definitions meeting, Jul 17)
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-            <div>
-              <div className="font-semibold text-[#1E1E1E]">Offer accepted</div>
-              <p className="text-slate-500 mt-1">Signed <em>both</em> the GJA and the Pledge. Lives in the admissions funnel (after “offer extended”).</p>
-            </div>
-            <div>
-              <div className="font-semibold text-[#1E1E1E]">Initial enrollment</div>
-              <p className="text-slate-500 mt-1">Attended at least one in-person class. Frozen after week 2. Denominator for persistence/completion; coaches are held to this.</p>
-            </div>
-            <div>
-              <div className="font-semibold text-[#1E1E1E]">Active enrollment</div>
-              <p className="text-slate-500 mt-1">The per-day roster from enrollment and withdrawal dates (deferred excluded) — the rolling, point-in-time denominator.</p>
-            </div>
-            <div>
-              <div className="font-semibold text-[#1E1E1E]">Attendance rate</div>
-              <p className="text-slate-500 mt-1">(Present + late) ÷ the <em>selected denominator</em>. Target 100%. Excused <strong>counts as absent</strong> and shows as a side count only.</p>
-            </div>
+          <div className="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-[#1E1E1E]">
+              Definitions <span className="font-medium normal-case text-slate-500">— live from the Data Dictionary</span>
+            </h2>
+            <a href={DATA_DICTIONARY_URL} target="_blank" rel="noopener noreferrer"
+              className="text-xs font-medium text-[#4242EA] hover:underline">Open Data Dictionary ↗</a>
           </div>
+          {!definitions ? (
+            <p className="text-sm text-slate-400">Loading definitions from the dictionary…</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+              {definitions.map(m => (
+                <div key={m.metric_id}>
+                  <div className="font-semibold text-[#1E1E1E] flex items-center gap-1">
+                    {m.name}{m.is_north_star && <span title="North-star metric">★</span>}
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400 mt-0.5">{m.stage} · {m.subdomain}</div>
+                  <p className="text-slate-500 mt-1">{m.definition}</p>
+                  {(m.numerator || m.denominator) && (
+                    <p className="text-xs text-slate-400 mt-1 font-mono">
+                      {m.numerator && <>num: {m.numerator}<br /></>}
+                      {m.denominator && <>den: {m.denominator}</>}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-slate-400 mt-4 border-t border-[#E3E3E3] pt-3">
+            Two working definitions this page uses aren’t yet standalone dictionary metrics (Jul 17 alignment): <strong>Offer accepted</strong> = signed both the GJA and the Pledge; <strong>Initial enrollment</strong> = attended ≥1 in-person class, frozen after week 2. Codify these in the dictionary and they’ll render here too.
+          </p>
         </section>
 
         {!loading && !error && view && view.weeklyBase.length > 0 && (
@@ -592,28 +734,48 @@ const AttendanceVizLab = () => {
               </div>
             </Card>
 
-            {/* Option C — daily operational view */}
-            <Card id="option-c" option="Option C" title={`Daily coach view — week ${view.lastWeek.week}`}
-              answers="The coach's operational question: who was in the room each day? Hover a column to see exactly who was excused and who didn't check in."
-              footnote={`Excused is broken out visually but counts as absent in the rate — the % on each column is (present + late) ÷ ${projC.denomShort} (${projC.denomCount}). Absent = ${projC.denomShort} with no check-in that day (absences aren't recorded as rows).`}>
-              <DenomToggle basis={basisC} setBasis={setBasisC} view={view} />
+            {/* Option C — attendance bars: weekly roll-up OR a chosen week's days */}
+            <Card id="option-c" option="Option C"
+              title={cMode === 'week' ? 'Attendance by week' : `Attendance by day — week ${cWeekEff}`}
+              answers="Is attendance holding week to week, and who was in the room on a given day? Switch between the weekly roll-up and any single week's days."
+              footnote={`Stacked by status; the % on each bar is (present + late) ÷ ${projC.denomShort} (${projC.denomCount}), excused counts as absent. ${cMode === 'week' ? "Weekly bars pool builder-days across the week's class days." : 'Absent = roster with no check-in that day (absences aren\'t recorded as rows).'}`}>
+              <div className="flex items-center gap-3 mb-3 flex-wrap">
+                <div className="flex rounded-md border border-[#E3E3E3] overflow-hidden">
+                  {[['week', 'By week'], ['day', 'By day']].map(([k, lab]) => (
+                    <button key={k} onClick={() => setCMode(k)}
+                      className={`px-3 py-1 text-xs font-medium transition-colors ${cMode === k ? 'bg-[#4242EA] text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                      {lab}
+                    </button>
+                  ))}
+                </div>
+                {cMode === 'day' && projC.availableWeeks.length > 1 && (
+                  <select value={cWeekEff} onChange={e => setCWeek(Number(e.target.value))}
+                    className="px-2 py-1 text-xs border border-[#E3E3E3] rounded-md bg-white text-[#1E1E1E] focus:border-[#4242EA] focus:outline-none">
+                    {projC.availableWeeks.map(w => <option key={w} value={w}>Week {w}</option>)}
+                  </select>
+                )}
+                <DenomToggle basis={basisC} setBasis={setBasisC} view={view} />
+              </div>
               <div style={{ width: '100%', height: 300 }}>
                 <ResponsiveContainer>
-                  <BarChart data={projC.currentWeekRows} margin={{ top: 24, right: 16, bottom: 0, left: 0 }}>
+                  <BarChart data={cMode === 'week' ? projC.weeklyBars : cDayRows} margin={{ top: 24, right: 16, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke={GRID} strokeWidth={1} vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 12, fill: INK_MUTED }} axisLine={{ stroke: GRID }} tickLine={false} />
-                    <YAxis domain={[0, projC.denomMax]} ticks={[0, 25, 50, 75, 100].filter(t => t <= projC.denomMax)} tick={{ fontSize: 12, fill: INK_MUTED }} axisLine={false} tickLine={false} width={36} />
-                    <Tooltip content={<DailyTooltip denomShort={projC.denomShort} />} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+                    <YAxis domain={[0, cMode === 'week' ? projC.weeklyBarMax : projC.denomMax]}
+                      ticks={cMode === 'day' ? [0, 25, 50, 75, 100].filter(t => t <= projC.denomMax) : undefined}
+                      tick={{ fontSize: 12, fill: INK_MUTED }} axisLine={false} tickLine={false} width={40} />
+                    <Tooltip content={cMode === 'week' ? <WeeklyBarTooltip denomShort={projC.denomShort} /> : <DailyTooltip denomShort={projC.denomShort} />} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar name="Present" dataKey="present" stackId="d" fill={STATUS.present} barSize={24} stroke="#fff" strokeWidth={2} isAnimationActive={false} />
-                    <Bar name="Late" dataKey="late" stackId="d" fill={STATUS.late} barSize={24} stroke="#fff" strokeWidth={2} isAnimationActive={false} />
-                    <Bar name="Excused (counts absent)" dataKey="excused" stackId="d" fill={STATUS.excused} barSize={24} stroke="#fff" strokeWidth={2} isAnimationActive={false} />
-                    <Bar name="Absent" dataKey="basisAbsent" stackId="d" fill={STATUS.absent} barSize={24} stroke="#fff" strokeWidth={2} radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                    <Bar name="Present" dataKey="present" stackId="d" fill={STATUS.present} barSize={cMode === 'week' ? 44 : 24} stroke="#fff" strokeWidth={2} isAnimationActive={false} />
+                    <Bar name="Late" dataKey="late" stackId="d" fill={STATUS.late} barSize={cMode === 'week' ? 44 : 24} stroke="#fff" strokeWidth={2} isAnimationActive={false} />
+                    <Bar name="Excused (counts absent)" dataKey="excused" stackId="d" fill={STATUS.excused} barSize={cMode === 'week' ? 44 : 24} stroke="#fff" strokeWidth={2} isAnimationActive={false} />
+                    <Bar name="Absent" dataKey="basisAbsent" stackId="d" fill={STATUS.absent} barSize={cMode === 'week' ? 44 : 24} stroke="#fff" strokeWidth={2} radius={[4, 4, 0, 0]} isAnimationActive={false}>
                       <LabelList dataKey="basisRate" position="top" fontSize={12} fill={INK} formatter={(v) => `${v}%`} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+              {cMode === 'day' && <p className="text-xs text-slate-400 mt-2">Tip: Option D’s heatmap cells open a per-day Sankey with names.</p>}
             </Card>
 
             {/* Option D — retro KPIs + heatmap */}
@@ -637,9 +799,9 @@ const AttendanceVizLab = () => {
                   deltaGood={view.excusedDelta <= 0} sub="side count — not in the rate" />
               </div>
               <div className="overflow-x-auto">
-                <div className="inline-grid gap-[2px]" style={{ gridTemplateColumns: `64px repeat(${WEEKDAYS.length}, 72px)` }}>
+                <div className="inline-grid gap-[2px]" style={{ gridTemplateColumns: `64px repeat(${view.weekdays.length}, 72px)` }}>
                   <div />
-                  {WEEKDAYS.map(d => (
+                  {view.weekdays.map(d => (
                     <div key={d} className="text-xs text-slate-500 font-medium text-center pb-1">{d}</div>
                   ))}
                   {projD.heatmap.map(row => (
@@ -649,11 +811,12 @@ const AttendanceVizLab = () => {
                         cell == null ? (
                           <div key={i} className="h-10 rounded flex items-center justify-center text-xs bg-slate-100 text-slate-400">—</div>
                         ) : (
-                          <div key={i} className="h-10 rounded flex items-center justify-center text-xs font-semibold"
+                          <button key={i} onClick={() => setModalDay(cell)}
+                            className="h-10 rounded flex items-center justify-center text-xs font-semibold cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-[#4242EA] transition-all"
                             style={{ backgroundColor: heatColor(cell.basisRate), color: heatInk(cell.basisRate) }}
-                            title={`${cell.date} — ${cell.basisRate}% (${cell.attended} of ${cell.basisDenom} ${projD.denomShort}; ${cell.excused} excused)`}>
+                            title={`${cell.date} — ${cell.basisRate}% (${cell.attended} of ${cell.basisDenom} ${projD.denomShort}; ${cell.excused} excused) · click for the day's breakdown`}>
                             {cell.basisRate}%
-                          </div>
+                          </button>
                         )
                       ))}
                     </React.Fragment>
@@ -661,7 +824,7 @@ const AttendanceVizLab = () => {
                 </div>
               </div>
               <p className="text-xs text-slate-400 mt-3">
-                Darker = higher attendance; “—” = no class that day. One hue, more-is-darker; the value is printed in every cell so color never carries the number alone.
+                Darker = higher attendance; “—” = no class that day. One hue, more-is-darker; the value is printed in every cell so color never carries the number alone. <strong>Click any cell</strong> for that day's attendance breakdown.
               </p>
             </Card>
           </>
@@ -673,6 +836,8 @@ const AttendanceVizLab = () => {
           <div className="text-center text-slate-500 py-16">No class-day attendance recorded for {view.cohort.name} yet.</div>
         )}
       </div>
+
+      <DailyAttendanceModal day={modalDay} onClose={() => setModalDay(null)} />
     </div>
   );
 };
