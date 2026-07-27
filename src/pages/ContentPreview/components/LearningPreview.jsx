@@ -21,7 +21,7 @@ import TaskCompletionBar from '../../../components/TaskCompletionBar/TaskComplet
 import { parseLinkedResources } from '../../../components/ResourcesPopover/ResourcesPopover';
 import LoadingCurtain from '../../../components/LoadingCurtain/LoadingCurtain';
 import { streamLearningMessage } from '../../../utils/api';
-import { createStreamBuffer } from '../../../utils/streamBufferUtils';
+import { createStreamBuffer, appendToMessageById } from '../../../utils/streamBufferUtils';
 
 import '../../Learning/Learning.css';
 import { useStreamingText } from '../../../hooks/useStreamingText';
@@ -204,6 +204,7 @@ function LearningPreview({ dayId, cohort, onBack }) {
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
   const sendMessageAbortControllerRef = useRef(null);
+  const deliverableAbortControllerRef = useRef(null);
   const textareaRef = useRef(null);
   const chatTrayRef = useRef(null);
   const prevMessageCountRef = useRef(0);
@@ -277,6 +278,7 @@ function LearningPreview({ dayId, cohort, onBack }) {
     return () => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
       if (sendMessageAbortControllerRef.current) sendMessageAbortControllerRef.current.abort();
+      if (deliverableAbortControllerRef.current) deliverableAbortControllerRef.current.abort();
     };
   }, []);
 
@@ -596,6 +598,13 @@ function LearningPreview({ dayId, cohort, onBack }) {
       const now = Date.now();
       const streamingMessageId = now + 1;
       const streamBuffer = createStreamBuffer();
+      // This stream owns exactly one bubble at a time and only ever writes to
+      // that id. A phase transition ('thinking' after text) hands ownership to
+      // a freshly created bubble. `ownedHasContent` mirrors the owned bubble's
+      // content so ownership decisions happen outside the state updaters.
+      let activeBubbleId = streamingMessageId;
+      let ownedHasContent = false;
+      let bubbleSeq = 0;
       const userMessage = {
         id: now,
         content: trimmedMessage,
@@ -632,92 +641,68 @@ function LearningPreview({ dayId, cohort, onBack }) {
             return;
           }
 
-          // Helper: find the index of the last AI bubble that's still streaming.
-          // We always target THAT bubble for updates — no ref needed.
-          const findActiveBubbleIdx = (msgs) => {
-            for (let i = msgs.length - 1; i >= 0; i--) {
-              if (msgs[i].sender === 'ai' && msgs[i].isStreaming) return i;
-            }
-            return -1;
-          };
+          // Target the bubble THIS stream owns, by id — never "the last AI
+          // bubble still streaming", which can belong to a concurrent stream.
+          const findOwnedBubbleIdx = (msgs) => msgs.findIndex(m => m.id === activeBubbleId);
 
           if (chunk.type === 'thinking') {
-            // Phase transition: if current bubble has content, finalize it and
-            // create a new thinking bubble. Otherwise just update the label.
-            setMessages(prev => {
-              const idx = findActiveBubbleIdx(prev);
-              const current = idx >= 0 ? prev[idx] : null;
-
-              if (current && current.content && current.content.trim().length > 0) {
-                // Finalize current, append a new thinking bubble
+            if (ownedHasContent) {
+              // Phase transition: close the bubble that already has text and
+              // open a fresh one. Ownership moves with it (computed here, not
+              // inside the updater, so the updater stays pure).
+              const finishedBubbleId = activeBubbleId;
+              const nextBubbleId = `v2-${now}-${++bubbleSeq}`;
+              const nextTimestamp = new Date().toISOString();
+              const nextLabel = chunk.label;
+              activeBubbleId = nextBubbleId;
+              ownedHasContent = false;
+              setMessages(prev => {
+                const idx = prev.findIndex(m => m.id === finishedBubbleId);
+                if (idx === -1) return prev;
                 const updated = [...prev];
                 updated[idx] = {
-                  ...current,
+                  ...updated[idx],
                   isStreaming: false,
                   isThinking: false,
                   thinkingLabel: null
                 };
                 updated.push({
-                  id: `v2-${Date.now()}-${updated.length}`,
+                  id: nextBubbleId,
                   content: '',
                   sender: 'ai',
-                  timestamp: new Date().toISOString(),
+                  timestamp: nextTimestamp,
                   isStreaming: true,
                   isThinking: true,
-                  thinkingLabel: chunk.label
+                  thinkingLabel: nextLabel
                 });
                 return updated;
-              }
-
-              if (current) {
-                // Current bubble is empty — update its label in place
+              });
+            } else {
+              // Owned bubble is still empty — update its label in place
+              setMessages(prev => {
+                const idx = findOwnedBubbleIdx(prev);
+                if (idx === -1) return prev;
                 const updated = [...prev];
-                updated[idx] = { ...current, isThinking: true, thinkingLabel: chunk.label };
+                updated[idx] = { ...updated[idx], isThinking: true, thinkingLabel: chunk.label };
                 return updated;
-              }
-
-              // No current bubble — create one (defensive)
-              return [...prev, {
-                id: `v2-${Date.now()}-${prev.length}`,
-                content: '',
-                sender: 'ai',
-                timestamp: new Date().toISOString(),
-                isStreaming: true,
-                isThinking: true,
-                thinkingLabel: chunk.label
-              }];
-            });
+              });
+            }
           } else if (chunk.type === 'text') {
             receivedChunk = true;
             const safeText = streamBuffer.append(chunk.content);
+            if (safeText.trim()) ownedHasContent = true;
             if (safeText) {
-              setMessages(prev => {
-                const idx = findActiveBubbleIdx(prev);
-                if (idx === -1) return prev;
-                return prev.map((m, i) =>
-                  i === idx
-                    ? {
-                        ...m,
-                        content: `${m.content || ''}${safeText}`,
-                        isThinking: false,
-                        thinkingLabel: null
-                      }
-                    : m
-                );
-              });
+              setMessages(prev => appendToMessageById(prev, activeBubbleId, safeText, {
+                isThinking: false,
+                thinkingLabel: null
+              }));
             }
           } else if (chunk.type === 'done' && chunk.message) {
             receivedChunk = true;
-            // Flush any remaining buffered text into the active bubble
+            // Flush any remaining buffered text into this stream's bubble
             const remaining = streamBuffer.flush();
             if (remaining) {
-              setMessages(prev => {
-                const idx = findActiveBubbleIdx(prev);
-                if (idx === -1) return prev;
-                return prev.map((m, i) =>
-                  i === idx ? { ...m, content: `${m.content || ''}${remaining}` } : m
-                );
-              });
+              setMessages(prev => appendToMessageById(prev, activeBubbleId, remaining));
             }
             setIsStreaming(false);
             setIsAiThinking(false);
@@ -728,7 +713,7 @@ function LearningPreview({ dayId, cohort, onBack }) {
             const finalMessage = chunk.message;
             const showAssignment = !!chunk.show_assignment;
             setMessages(prev => {
-              const idx = findActiveBubbleIdx(prev);
+              const idx = findOwnedBubbleIdx(prev);
               if (idx === -1) return prev;
               return prev.map((m, i) =>
                 i === idx
@@ -746,16 +731,26 @@ function LearningPreview({ dayId, cohort, onBack }) {
               );
             });
           } else if (chunk.type === 'error') {
-            // Keep partial content if any was streamed; drop only empty bubbles.
+            // Flush the buffer first — a held partial-marker tail is real text
+            // and would otherwise be silently dropped on the error path.
+            const remaining = streamBuffer.flush();
+            // Keep partial content if any was streamed; drop this stream's
+            // bubble only if it never received text.
             setMessages(prev => prev
               .filter(msg => {
-                if (msg.sender !== 'ai' || !msg.isStreaming) return true;
-                return !!(msg.content && msg.content.trim());
+                if (msg.id !== activeBubbleId) return true;
+                return !!`${msg.content || ''}${remaining}`.trim();
               })
-              .map(msg => (msg.sender === 'ai' && msg.isStreaming)
-                ? { ...msg, isStreaming: false, isThinking: false, thinkingLabel: null }
+              .map(msg => (msg.id === activeBubbleId
+                ? {
+                    ...msg,
+                    content: `${msg.content || ''}${remaining}`,
+                    isStreaming: false,
+                    isThinking: false,
+                    thinkingLabel: null
+                  }
                 : msg
-              )
+              ))
             );
             setIsStreaming(false);
             setIsAiThinking(false);
@@ -851,6 +846,21 @@ function LearningPreview({ dayId, cohort, onBack }) {
       return;
     }
 
+    // Same in-flight guard as handleSendMessage: this submit can open its own
+    // SSE stream, and two streams writing to the chat at once interleave.
+    if (isSending || isAiThinking || isStreaming) {
+      toast.error("Hang on — the coach is still responding.");
+      return;
+    }
+
+    // Abort a previous submit stream and give this one its own controller,
+    // matching the send-message path.
+    if (deliverableAbortControllerRef.current) {
+      deliverableAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    deliverableAbortControllerRef.current = abortController;
+
     try {
       const response = await fetch(`${API_URL}/api/submissions`, {
         method: 'POST',
@@ -859,6 +869,7 @@ function LearningPreview({ dayId, cohort, onBack }) {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ taskId: currentTask.id, content: deliverableData, isPreviewMode: true }),
+        signal: abortController.signal,
       });
 
       if (!response.ok) throw new Error('Failed to submit');
@@ -871,7 +882,10 @@ function LearningPreview({ dayId, cohort, onBack }) {
         toast.success("Submitted! The coach is reviewing your work…", { duration: 3000 });
         setIsStreaming(true);
 
-        const baseBubbleId = `v2-submit-${Date.now()}`;
+        // Create the AI bubble this stream owns. Like handleSendMessage, every
+        // write targets that id — never "the last streaming bubble".
+        const submitStartedAt = Date.now();
+        const baseBubbleId = `v2-submit-${submitStartedAt}`;
         setMessages(prev => [
           ...prev,
           {
@@ -885,12 +899,10 @@ function LearningPreview({ dayId, cohort, onBack }) {
           }
         ]);
 
-        const findActiveBubbleIdx = (msgs) => {
-          for (let i = msgs.length - 1; i >= 0; i--) {
-            if (msgs[i].sender === 'ai' && msgs[i].isStreaming) return i;
-          }
-          return -1;
-        };
+        let activeBubbleId = baseBubbleId;
+        let ownedHasContent = false;
+        let bubbleSeq = 0;
+        const findOwnedBubbleIdx = (msgs) => msgs.findIndex(m => m.id === activeBubbleId);
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -900,48 +912,48 @@ function LearningPreview({ dayId, cohort, onBack }) {
           if (data.type === 'submission' && data.submission) {
             setTaskSubmissions(prev => ({ ...prev, [currentTask.id]: data.submission }));
           } else if (data.type === 'thinking') {
-            setMessages(prev => {
-              const idx = findActiveBubbleIdx(prev);
-              const current = idx >= 0 ? prev[idx] : null;
-              if (current && current.content && current.content.trim().length > 0) {
+            if (ownedHasContent) {
+              const finishedBubbleId = activeBubbleId;
+              const nextBubbleId = `v2-submit-${submitStartedAt}-${++bubbleSeq}`;
+              const nextTimestamp = new Date().toISOString();
+              const nextLabel = data.label;
+              activeBubbleId = nextBubbleId;
+              ownedHasContent = false;
+              setMessages(prev => {
+                const idx = prev.findIndex(m => m.id === finishedBubbleId);
+                if (idx === -1) return prev;
                 const updated = [...prev];
-                updated[idx] = { ...current, isStreaming: false, isThinking: false, thinkingLabel: null };
+                updated[idx] = { ...updated[idx], isStreaming: false, isThinking: false, thinkingLabel: null };
                 updated.push({
-                  id: `v2-submit-${Date.now()}-${updated.length}`,
+                  id: nextBubbleId,
                   content: '',
                   sender: 'ai',
-                  timestamp: new Date().toISOString(),
+                  timestamp: nextTimestamp,
                   isStreaming: true,
                   isThinking: true,
-                  thinkingLabel: data.label
+                  thinkingLabel: nextLabel
                 });
                 return updated;
-              }
-              if (current) {
+              });
+            } else {
+              setMessages(prev => {
+                const idx = findOwnedBubbleIdx(prev);
+                if (idx === -1) return prev;
                 const updated = [...prev];
-                updated[idx] = { ...current, isThinking: true, thinkingLabel: data.label };
+                updated[idx] = { ...updated[idx], isThinking: true, thinkingLabel: data.label };
                 return updated;
-              }
-              return prev;
-            });
+              });
+            }
           } else if (data.type === 'text') {
-            setMessages(prev => {
-              const idx = findActiveBubbleIdx(prev);
-              if (idx === -1) return prev;
-              return prev.map((m, i) =>
-                i === idx
-                  ? {
-                      ...m,
-                      content: `${m.content || ''}${data.content || ''}`,
-                      isThinking: false,
-                      thinkingLabel: null
-                    }
-                  : m
-              );
-            });
+            const text = data.content || '';
+            if (text.trim()) ownedHasContent = true;
+            setMessages(prev => appendToMessageById(prev, activeBubbleId, text, {
+              isThinking: false,
+              thinkingLabel: null
+            }));
           } else if (data.type === 'done') {
             setMessages(prev => {
-              const idx = findActiveBubbleIdx(prev);
+              const idx = findOwnedBubbleIdx(prev);
               if (idx === -1) return prev;
               const finalContent = data.message?.content;
               return prev.map((m, i) =>
@@ -960,14 +972,16 @@ function LearningPreview({ dayId, cohort, onBack }) {
             });
             setIsStreaming(false);
           } else if (data.type === 'error') {
-            setMessages(prev => prev.filter(m => !(m.sender === 'ai' && m.isStreaming)));
+            // Drop this stream's own bubble only — another in-flight stream's
+            // bubble is not ours to remove.
+            setMessages(prev => prev.filter(m => m.id !== activeBubbleId));
             setIsStreaming(false);
             toast.error(data.error || "Coach failed to review the submission.");
           }
         };
 
         try {
-          while (true) {
+          while (!abortController.signal.aborted) {
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
@@ -983,12 +997,14 @@ function LearningPreview({ dayId, cohort, onBack }) {
               }
             }
           }
-          if (buffer.startsWith('data: ')) {
+          if (!abortController.signal.aborted && buffer.startsWith('data: ')) {
             try { processChunk(JSON.parse(buffer.slice(6))); } catch {}
           }
         } finally {
           setIsStreaming(false);
-          await checkTaskCompletion(currentTask.id);
+          if (!abortController.signal.aborted) {
+            await checkTaskCompletion(currentTask.id);
+          }
         }
         return;
       }
@@ -999,6 +1015,11 @@ function LearningPreview({ dayId, cohort, onBack }) {
       await checkTaskCompletion(currentTask.id);
       toast.success("Deliverable submitted!");
     } catch (err) {
+      // Ignore abort errors - they're expected when switching tasks / unmounting
+      if (err.name === 'AbortError') {
+        console.log('🚫 Deliverable submit request aborted');
+        return;
+      }
       console.error('Error submitting:', err);
       toast.error("Failed to submit");
     }
@@ -1429,6 +1450,7 @@ function LearningPreview({ dayId, cohort, onBack }) {
               onSubmit={handleDeliverableSubmit}
               userId={user?.id}
               taskId={tasks[currentTaskIndex].id}
+              isStreaming={isSending || isAiThinking || isStreaming}
             />
           )}
 

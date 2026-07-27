@@ -42,3 +42,24 @@ export function createStreamBuffer() {
     }
   };
 }
+
+// Append streamed text to the ONE message a stream owns, matched by id.
+//
+// Streams must never target "the last AI bubble that is still streaming":
+// two concurrent streams (a chat turn and a deliverable review) both leave a
+// streaming bubble in the list, so whichever chunk arrives next lands in the
+// other stream's bubble and the two responses fuse into one string with no
+// separator. Matching by id keeps each stream inside its own bubble.
+//
+// If the id is no longer in the list (bubble dropped, task switched) the text
+// is discarded — dropping a chunk is always safer than splicing it into
+// someone else's message. `patch` is merged into the matched message.
+export function appendToMessageById(messages, messageId, text, patch = {}) {
+  if (!text || messageId == null) return messages;
+  if (!messages.some(m => m.id === messageId)) return messages;
+  return messages.map(m =>
+    m.id === messageId
+      ? { ...m, ...patch, content: `${m.content || ''}${text}` }
+      : m
+  );
+}

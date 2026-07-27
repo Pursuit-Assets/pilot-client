@@ -4,7 +4,8 @@ import { Input } from '../../../../components/ui/input';
 import { Loader2, ExternalLink, AlertCircle } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 
-function LinkSubmission({ currentSubmission, isSubmitting, isLocked, onSubmit, userId, taskId }) {
+// isStreaming: a chat/coach stream is in flight — block a second concurrent stream.
+function LinkSubmission({ currentSubmission, isSubmitting, isLocked, isStreaming = false, onSubmit, userId, taskId }) {
   const [url, setUrl] = useState('');
 
   const draftKey = userId && taskId ? `deliverable_draft_${userId}_${taskId}` : null;
@@ -78,7 +79,7 @@ function LinkSubmission({ currentSubmission, isSubmitting, isLocked, onSubmit, u
 
           <Button
             onClick={handleSubmit}
-            disabled={!url.trim() || !isValidUrl(url) || isSubmitting || isLocked}
+            disabled={!url.trim() || !isValidUrl(url) || isSubmitting || isLocked || isStreaming}
             className={cn(
               'flex items-center justify-center px-[20px] py-[5px] h-[32px] bg-pursuit-purple rounded-[100px]',
               'text-[16px] leading-[18px] font-proxima font-normal text-[#F1F1F1]',

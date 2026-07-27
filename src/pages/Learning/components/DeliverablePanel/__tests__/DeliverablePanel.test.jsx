@@ -19,20 +19,22 @@ beforeAll(() => {
   if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
 });
 
-function renderPanel(task, currentSubmission = null) {
+function renderPanel(task, currentSubmission = null, extraProps = {}) {
   const onSubmit = vi.fn().mockResolvedValue(undefined);
-  const utils = render(
-    <DeliverablePanel
-      task={task}
-      currentSubmission={currentSubmission}
-      isOpen={true}
-      onClose={() => {}}
-      onSubmit={onSubmit}
-      userId={1}
-      taskId={100}
-    />
-  );
-  return { onSubmit, ...utils };
+  const props = {
+    task,
+    currentSubmission,
+    isOpen: true,
+    onClose: () => {},
+    onSubmit,
+    userId: 1,
+    taskId: 100,
+    ...extraProps,
+  };
+  const utils = render(<DeliverablePanel {...props} />);
+  const rerenderWith = (nextProps) =>
+    utils.rerender(<DeliverablePanel {...props} {...nextProps} />);
+  return { onSubmit, rerenderWith, ...utils };
 }
 
 const LINK_PLACEHOLDER = 'Copy and paste your link here...';
@@ -138,6 +140,16 @@ describe('DeliverablePanel — submit behavior', () => {
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ loomUrl: 'https://www.loom.com/share/abc123' });
   });
 
+  it('does not block submit when isStreaming is omitted (safe default)', async () => {
+    const { onSubmit } = renderPanel({ deliverable_type: 'link' });
+    fireEvent.change(screen.getByPlaceholderText(LINK_PLACEHOLDER), {
+      target: { value: 'https://example.com/work' },
+    });
+    expect(screen.getByRole('button', { name: /^submit$/i })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /^submit$/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+  });
+
   it('a submitted link deliverable shows "Update Submission" and prefills the URL', () => {
     renderPanel(
       { deliverable_type: 'link' },
@@ -145,5 +157,46 @@ describe('DeliverablePanel — submit behavior', () => {
     );
     expect(screen.getByDisplayValue('https://example.com/existing')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /update submission/i })).toBeInTheDocument();
+  });
+});
+
+// Submitting while the chat already has an AI stream in flight opens a second
+// concurrent SSE stream into the same message list, which is what let chunks
+// from one stream splice into the other's bubble.
+describe('DeliverablePanel — submit is blocked while a chat stream is in flight', () => {
+  it('link panel: disables submit and ignores clicks while streaming', () => {
+    const { onSubmit, rerenderWith } = renderPanel({ deliverable_type: 'link' });
+    // Fill the URL before the stream starts, so the button is otherwise valid.
+    fireEvent.change(screen.getByPlaceholderText(LINK_PLACEHOLDER), {
+      target: { value: 'https://example.com/work' },
+    });
+    const btn = screen.getByRole('button', { name: /^submit$/i });
+    expect(btn).not.toBeDisabled();
+
+    rerenderWith({ isStreaming: true });
+    expect(screen.getByRole('button', { name: /^submit$/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /^submit$/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // The input stays editable — the builder can keep preparing their answer.
+    expect(screen.getByPlaceholderText(LINK_PLACEHOLDER)).not.toBeDisabled();
+
+    // Once the stream finishes the submit works again.
+    rerenderWith({ isStreaming: false });
+    expect(screen.getByRole('button', { name: /^submit$/i })).not.toBeDisabled();
+  });
+
+  it('video/Loom panel: disables submit while streaming', () => {
+    const { rerenderWith } = renderPanel(
+      { deliverable_type: 'video', deliverable: 'Record a demo.' },
+      null,
+      { isStreaming: false }
+    );
+    fireEvent.change(screen.getByPlaceholderText('https://www.loom.com/share/...'), {
+      target: { value: 'https://www.loom.com/share/abc123' },
+    });
+    expect(screen.getByRole('button', { name: /submit/i })).not.toBeDisabled();
+    rerenderWith({ isStreaming: true });
+    expect(screen.getByRole('button', { name: /submit/i })).toBeDisabled();
   });
 });

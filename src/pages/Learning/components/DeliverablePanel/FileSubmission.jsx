@@ -10,6 +10,8 @@ function FileSubmission({
   currentSubmission,
   isSubmitting,
   isLocked,
+  // A chat/coach stream is in flight — block a second concurrent stream.
+  isStreaming = false,
   onSubmit,
   userId,
   taskId
@@ -205,7 +207,7 @@ function FileSubmission({
       <div className="border-t border-divider px-6 py-4">
         <Button
           onClick={handleSubmit}
-          disabled={!fileData || !fileData.base64 || isSubmitting || isLocked}
+          disabled={!fileData || !fileData.base64 || isSubmitting || isLocked || isStreaming}
           className="w-full bg-pursuit-purple hover:bg-pursuit-purple/90 text-white font-proxima text-sm"
         >
           {isSubmitting ? (

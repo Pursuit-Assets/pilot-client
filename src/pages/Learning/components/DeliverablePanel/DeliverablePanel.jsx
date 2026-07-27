@@ -39,11 +39,20 @@ function DeliverablePanel({
   onSubmit,
   isLocked = false,
   userId,
-  taskId
+  taskId,
+  // True while the chat already has an AI stream in flight. Submitting then
+  // would open a second concurrent stream into the same message list, so each
+  // submission panel disables its submit button until the stream finishes
+  // (inputs stay editable). Defaults to false so callers that don't pass it
+  // behave exactly as before.
+  isStreaming = false
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (submissionData) => {
+    // Belt-and-suspenders: the submit buttons are disabled while streaming,
+    // this stops a programmatic/in-flight call from opening a second stream.
+    if (isStreaming) return;
     setIsSubmitting(true);
     try {
       await onSubmit(submissionData);
@@ -77,6 +86,7 @@ function DeliverablePanel({
       currentSubmission,
       isSubmitting,
       isLocked,
+      isStreaming,
       onSubmit: handleSubmit,
       userId,
       taskId

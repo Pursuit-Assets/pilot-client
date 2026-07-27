@@ -4,7 +4,8 @@ import { Textarea } from '../../../../components/ui/textarea';
 import { Input } from '../../../../components/ui/input';
 import { Loader2, Video, ExternalLink } from 'lucide-react';
 
-function StructuredSubmission({ task, schema, currentSubmission, isSubmitting, isLocked, onSubmit, userId, taskId }) {
+// isStreaming: a chat/coach stream is in flight — block a second concurrent stream.
+function StructuredSubmission({ task, schema, currentSubmission, isSubmitting, isLocked, isStreaming = false, onSubmit, userId, taskId }) {
   const [formData, setFormData] = useState({});
   const [validationError, setValidationError] = useState('');
 
@@ -343,7 +344,7 @@ function StructuredSubmission({ task, schema, currentSubmission, isSubmitting, i
       <div className="border-t border-divider px-6 py-4">
         <Button
           onClick={handleSubmit}
-          disabled={!isFormComplete() || isSubmitting || isLocked}
+          disabled={!isFormComplete() || isSubmitting || isLocked || isStreaming}
           className="w-full bg-pursuit-purple hover:bg-pursuit-purple/90 text-white font-proxima text-sm"
         >
           {isSubmitting ? (
