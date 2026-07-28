@@ -169,6 +169,66 @@ const gradeReason = (sr) => {
   return null;
 };
 
+/**
+ * Human-readable difficulty for the init step's learn strategy.
+ *
+ * Difficulty became Dreyfus-native on 2026-07-28 (`currentLevel` → `targetLevel`,
+ * one stage up; `difficultyLevel` is now one of 6 level slugs). Runs recorded
+ * BEFORE that date carry the retired 3-band vocabulary
+ * ('beginner'/'intermediate'/'advanced') with no levels, so this renders both —
+ * historical `agent_run_steps` rows are never rewritten.
+ */
+const LEGACY_DIFFICULTY_BANDS = ['beginner', 'intermediate', 'advanced'];
+
+const formatRunDifficulty = (strat) => {
+  if (Number.isInteger(strat.targetLevel)) {
+    const target = `targets ${levelLabel(strat.targetLevel)}`;
+    const from = Number.isInteger(strat.currentLevel)
+      ? ` — builder was at ${levelLabel(strat.currentLevel)}`
+      : ' — builder unassessed on these skills';
+    return (
+      <>
+        {target}
+        <span className="text-slate-500">{from}</span>
+      </>
+    );
+  }
+  // Pre-migration run: show the band it actually used, labelled as legacy so the
+  // number isn't mistaken for a Dreyfus level.
+  const isLegacy = LEGACY_DIFFICULTY_BANDS.includes(strat.difficultyLevel);
+  return (
+    <>
+      <span className="capitalize">{strat.difficultyLevel}</span>
+      {strat.avgLevel != null && (
+        <span className="text-slate-500"> (avg skill {Math.round(strat.avgLevel)}/100)</span>
+      )}
+      {isLegacy && (
+        <span
+          className="text-slate-400 text-xs ml-1"
+          title="Recorded before difficulty moved to the Dreyfus scale on 2026-07-28. The 3 old bands collapsed Dreyfus 2↔3 and 4↔5 onto the same challenge."
+        >
+          · legacy 3-band
+        </span>
+      )}
+    </>
+  );
+};
+
+/** Plain-text form of the above, for the copyable run summary. */
+const difficultySummaryText = (strat) => {
+  const modifier = strat.difficultyModifier === '+20%' ? ' · +20% for interview weak area' : '';
+  if (Number.isInteger(strat.targetLevel)) {
+    const from = Number.isInteger(strat.currentLevel)
+      ? `builder at ${levelLabel(strat.currentLevel)}`
+      : 'builder unassessed';
+    return `targets ${levelLabel(strat.targetLevel)} (${from})${modifier}`;
+  }
+  if (!strat.difficultyLevel) return '';
+  const avg = strat.avgLevel != null ? ` (avg skill ${Math.round(strat.avgLevel)})` : '';
+  const legacy = LEGACY_DIFFICULTY_BANDS.includes(strat.difficultyLevel) ? ' · legacy 3-band' : '';
+  return `${strat.difficultyLevel}${avg}${legacy}${modifier}`;
+};
+
 /** Highest assessed Dreyfus level in a grade — the run's headline achievement
  *  badge ("Proficient" next to Passed). Null when no per-skill assessments. */
 const topLevel = (assessments) => {
@@ -454,13 +514,12 @@ const PersonalizationCard = ({ strat }) => {
         {strat.teachingMethod && (
           <li className="flex gap-2"><span>📘</span><span><span className="font-semibold">Teaching style:</span> {methodLabel}</span></li>
         )}
-        {strat.difficultyLevel && (
+        {(strat.difficultyLevel || Number.isInteger(strat.targetLevel)) && (
           <li className="flex gap-2">
             <span>🎚️</span>
             <span>
               <span className="font-semibold">Difficulty:</span>{' '}
-              <span className="capitalize">{strat.difficultyLevel}</span>
-              {strat.avgLevel != null && <span className="text-slate-500"> (avg skill {Math.round(strat.avgLevel)}/100)</span>}
+              {formatRunDifficulty(strat)}
             </span>
           </li>
         )}
@@ -846,9 +905,8 @@ const buildRunSummaryModel = (run) => {
       rationale: a.rationale || '',
     })),
     teachingStyle: strat.teachingMethod ? (TEACHING_METHOD_LABEL[strat.teachingMethod] || strat.teachingMethod) : '',
-    difficulty: strat.difficultyLevel
-      ? `${strat.difficultyLevel}${strat.avgLevel != null ? ` (avg skill ${Math.round(strat.avgLevel)})` : ''}${strat.difficultyModifier === '+20%' ? ' · +20% for interview weak area' : ''}`
-      : '',
+    // Plain-text twin of formatRunDifficulty — same both-vocabularies rule.
+    difficulty: difficultySummaryText(strat),
     attempts: gradeSteps.length || 0,
   };
 };

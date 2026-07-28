@@ -34,8 +34,27 @@ const Chip = ({ children, tone = 'slate' }) => (
   </span>
 );
 
-const difficultyTone = (band) =>
-  band === 'advanced' ? 'green' : band === 'intermediate' ? 'amber' : 'slate';
+// Difficulty bands became the 6 Dreyfus levels on 2026-07-28 (keyed to the level
+// the challenge TARGETS). The three legacy keys are kept because archetypes and
+// stored runs from before then still carry them.
+const DIFFICULTY_TONE = {
+  // Dreyfus (current vocabulary)
+  below_novice: 'slate',
+  novice: 'slate',
+  advanced_beginner: 'teal',
+  competent: 'amber',
+  proficient: 'green',
+  expert: 'violet',
+  // retired 3-band vocabulary
+  beginner: 'slate',
+  intermediate: 'amber',
+  advanced: 'green',
+};
+const difficultyTone = (band) => DIFFICULTY_TONE[band] || 'slate';
+
+// Slug → display text, so a column reads "Proficient" not "proficient".
+const difficultyLabel = (band) =>
+  band ? band.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()) : '—';
 
 const METHOD_LABELS = {
   socratic: 'Socratic',
@@ -485,9 +504,13 @@ const DetailPanel = ({ archetype, tasks, selectedTaskId, onSelectTask, selectedT
             <div className="flex flex-wrap items-center gap-1.5 mt-2">
               <Chip tone={methodTone(derived.teachingMethod)}>{methodLabel(derived.teachingMethod)}</Chip>
               <Chip tone={difficultyTone(derived.difficultyLevel)}>
-                {derived.difficultyLevel || '—'}
-                {derived.avgLevel != null && ` · avg ${Math.round(derived.avgLevel)}`}
+                {Number.isInteger(derived.targetLevel)
+                  ? `targets L${derived.targetLevel} ${difficultyLabel(derived.difficultyLevel)}`
+                  : difficultyLabel(derived.difficultyLevel)}
               </Chip>
+              {Number.isInteger(derived.currentLevel) && (
+                <Chip tone="slate">now L{derived.currentLevel}</Chip>
+              )}
               {derived.difficultyModifier === '+20%' && <Chip tone="red">+20% interview</Chip>}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">
@@ -775,7 +798,7 @@ const GoldenDataset = ({ embedded = false }) => {
                   </div>
                   <div className="flex items-center gap-1 mt-1">
                     <Chip tone={methodTone(d.teachingMethod)}>{methodLabel(d.teachingMethod)}</Chip>
-                    <Chip tone={difficultyTone(d.difficultyLevel)}>{d.difficultyLevel || '—'}</Chip>
+                    <Chip tone={difficultyTone(d.difficultyLevel)}>{difficultyLabel(d.difficultyLevel)}</Chip>
                     {runResults[a.key] && <span className="text-[10px] text-slate-400">· ran</span>}
                   </div>
                 </button>
