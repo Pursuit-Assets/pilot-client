@@ -208,6 +208,7 @@ const AdmissionsDashboard = () => {
     education: false,
     referral: false,
     referral_detail: false,
+    referral_channel: false,
     pledge: false,
     gja: true,
     income: false
