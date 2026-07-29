@@ -196,9 +196,11 @@ const Layout = ({ children, isLoading = false }) => {
   };
 
   // Get the current page icon for mobile menu button
+  const logoIcon = <img src={logo} alt="Logo" className="h-5 w-5 object-contain" />;
+
   const getCurrentPageIcon = () => {
     const iconMap = {
-      '/dashboard': logo,
+      '/dashboard': logoIcon,
       '/learning': (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M2 3H8C9.1 3 10 3.9 10 5V19C10 20.1 9.1 21 8 21H2C1.45 21 1 20.55 1 20V4C1 3.45 1.45 3 2 3Z" stroke="#E3E3E3" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -285,7 +287,7 @@ const Layout = ({ children, isLoading = false }) => {
       return <CalendarIcon className="h-4 w-4 text-[#E3E3E3]" />;
     }
 
-    return iconMap[location.pathname] || logo;
+    return iconMap[location.pathname] || logoIcon;
   };
 
   // Helper to render nav items (reduces code duplication)
@@ -366,11 +368,7 @@ const Layout = ({ children, isLoading = false }) => {
                 isMobileNavbarOpen ? "bg-[#4242EA]" : "bg-[#4242EA] hover:bg-blue-600"
               )}
             >
-              {location.pathname === '/dashboard' ? (
-                <img src={logo} alt="Logo" className="h-5 w-5 object-contain" />
-              ) : (
-                getCurrentPageIcon()
-              )}
+              {getCurrentPageIcon()}
             </button>
 
             {/* Mobile Close Button */}

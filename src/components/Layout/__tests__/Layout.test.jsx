@@ -244,6 +244,16 @@ describe('Layout Component', () => {
       expect(screen.getByRole('button')).toBeInTheDocument();
     });
 
+    // Regression: getCurrentPageIcon returned the imported logo URL (a string),
+    // which React rendered as literal path text inside the menu button.
+    it('should render the logo as an image, not its path, for unmapped routes', () => {
+      renderLayout({}, '/platform-intake');
+
+      const menuButton = screen.getByRole('button');
+      expect(menuButton.querySelector('img')).toBeInTheDocument();
+      expect(menuButton).toHaveTextContent('');
+    });
+
     it('should toggle mobile navbar when menu button is clicked', () => {
       renderLayout();
 
