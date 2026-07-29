@@ -3,6 +3,9 @@ import useAuthStore from '../../../stores/authStore';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { listCoachRuns, getCoachRun } from '../../../services/coachRunsApi';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../../../components/ui/sheet';
+import {
+  DREYFUS_LABELS, levelLabel, vsPriorLabel, gradeReason, topLevel, GRADE_ERROR_TEXT, SkillAssessmentTable,
+} from '../coachDreyfus';
 
 const BRAND = '#4242EA';
 
@@ -142,77 +145,8 @@ const CriteriaTable = ({ criteriaScores }) => {
 // that carry no per-skill assessments.
 // ---------------------------------------------------------------------------
 
-const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
-
-const levelLabel = (level) =>
-  Number.isInteger(level) ? `L${level} ${DREYFUS_LABELS[level] || ''}`.trim() : 'N/A';
-
-/** "improved from L2" / "held L3" / "below prior L4" / "new skill" (needs a.prior from the engine). */
-const vsPriorLabel = (a) => {
-  if (!Number.isInteger(a.level)) return null;
-  if (!Number.isInteger(a.prior)) return 'new skill';
-  if (a.level > a.prior) return `↑ improved from L${a.prior}`;
-  if (a.level === a.prior) return `held L${a.prior}`;
-  return `↓ below prior L${a.prior}`;
-};
-
-/** Why the run passed/failed, from the window-relative rule. Null when the run
- *  pre-dates the engine exposing metCount/held. */
-const gradeReason = (sr) => {
-  if (Number.isInteger(sr.metCount) && Number.isInteger(sr.assessedCount)) {
-    return `held or improved on ${sr.metCount} of ${sr.assessedCount} skill${sr.assessedCount === 1 ? '' : 's'}`;
-  }
-  const withHeld = (sr.skillAssessments || []).filter((a) => typeof a.held === 'boolean');
-  if (withHeld.length) {
-    return `held or improved on ${withHeld.filter((a) => a.held).length} of ${withHeld.length} skill${withHeld.length === 1 ? '' : 's'}`;
-  }
-  return null;
-};
-
-/** Highest assessed Dreyfus level in a grade — the run's headline achievement
- *  badge ("Proficient" next to Passed). Null when no per-skill assessments. */
-const topLevel = (assessments) => {
-  const levels = (Array.isArray(assessments) ? assessments : [])
-    .map((a) => a.level).filter(Number.isInteger);
-  return levels.length ? Math.max(...levels) : null;
-};
-
-const GRADE_ERROR_TEXT = '⚠️ Grading error — a system issue prevented evaluation. Not a reflection of the builder\'s work.';
-
-/** Per-skill Dreyfus assessments incl. the grader's rationale + evidence. */
-const SkillAssessmentTable = ({ assessments }) => {
-  if (!Array.isArray(assessments) || assessments.length === 0) return null;
-  return (
-    <div className="border border-[#E3E3E3] rounded-md overflow-hidden">
-      <table className="w-full text-xs">
-        <thead className="bg-[#F7F7F9] text-slate-600">
-          <tr>
-            <th className="text-left px-3 py-2 font-semibold">Skill</th>
-            <th className="text-left px-3 py-2 font-semibold w-36">Level</th>
-            <th className="text-left px-3 py-2 font-semibold w-32">vs prior</th>
-            <th className="text-left px-3 py-2 font-semibold">Grader&apos;s rationale</th>
-            <th className="text-left px-3 py-2 font-semibold">Evidence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {assessments.map((a, i) => (
-            <tr key={i} className="border-t border-[#EEE] align-top">
-              <td className="px-3 py-2 text-slate-800 capitalize">{(a.skill_slug || '—').replace(/-/g, ' ')}</td>
-              <td className="px-3 py-2">
-                <Chip tone={Number.isInteger(a.level) ? (a.level >= 3 ? 'green' : a.level >= 1 ? 'blue' : 'red') : 'slate'}>
-                  {levelLabel(a.level)}
-                </Chip>
-              </td>
-              <td className="px-3 py-2 text-slate-600">{vsPriorLabel(a) || '—'}</td>
-              <td className="px-3 py-2 text-slate-600">{a.rationale || '—'}</td>
-              <td className="px-3 py-2 text-slate-500 italic">{a.evidence || '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
+// Dreyfus helpers + SkillAssessmentTable now live in ../coachDreyfus (shared
+// with CoachEvals) and are imported at the top of this file.
 
 // ===========================================================================
 // DEVELOPER VIEW — one card per agent step (the original technical timeline).

@@ -3,11 +3,17 @@ import { Link } from 'react-router-dom';
 import useAuthStore from '../../../stores/authStore';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { listSuites, runEval, listBatches, getBatch, getCase } from '../../../services/coachEvalsApi';
+import { SkillAssessmentTable, gradeReason, topLevel, levelLabel, GRADE_ERROR_TEXT } from '../coachDreyfus';
 
 const BRAND = '#4242EA';
 
+// The 8 judge dimensions (coachEvalJudges.js). teaching_method_adherence and
+// remediation are CONDITIONAL — they only score when the run had a declared
+// teaching style / actually remediated; when absent the case detail shows a
+// muted "not scored" row rather than silently dropping them.
 const DIMENSION_LABELS = {
   teaching: 'Teaching',
+  teaching_method_adherence: 'Method adherence',
   challenge_design: 'Challenge design',
   grading_quality: 'Grading quality',
   grading_consistency: 'Grading consistency',
@@ -16,11 +22,20 @@ const DIMENSION_LABELS = {
   end_to_end: 'End-to-end',
 };
 
+// Why a dimension is absent — shown on the muted "not scored" row so "not
+// applicable to this run" reads differently from "we forgot to measure it".
+const DIMENSION_ABSENT_REASON = {
+  teaching_method_adherence: 'builder has no declared teaching style',
+  remediation: 'builder passed first attempt — no remediation turn',
+  grading_consistency: 're-grade sampling did not produce a stable signal',
+};
+
 // Short, unambiguous labels for the compact per-case dimension chips.
 // (The slice(0,4) approach collapsed "Grading quality" and "Grading
 // consistency" both to "Grad".)
 const DIMENSION_SHORT = {
   teaching: 'Teach',
+  teaching_method_adherence: 'Method',
   challenge_design: 'Chall',
   grading_quality: 'Grade',
   grading_consistency: 'Consist',
@@ -28,6 +43,10 @@ const DIMENSION_SHORT = {
   completion: 'Compl',
   end_to_end: 'E2E',
 };
+
+// grading_consistency is objective (computed level-stability), not an LLM
+// opinion — flag it so reviewers read its score differently.
+const OBJECTIVE_DIMENSIONS = new Set(['grading_consistency']);
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString() : '—');
 const scoreTone = (s) => (s == null ? 'slate' : s >= 80 ? 'green' : s >= 60 ? 'amber' : 'red');
@@ -48,6 +67,40 @@ const Chip = ({ children, tone = 'slate' }) => (
 const StatusBadge = ({ status }) => {
   const tone = status === 'done' ? 'green' : status === 'failed' ? 'red' : 'amber';
   return <Chip tone={tone}>{status}</Chip>;
+};
+
+/**
+ * The COACH's own Dreyfus grade for the case — the artifact the grading_quality
+ * judge is judging. Sourced from the run's latest grade step (attached to the
+ * case by the server as `coachGrade`). Shown next to the judge verdicts so a
+ * reviewer can see what was graded, not just the opinion of it.
+ */
+const CoachGradePanel = ({ grade }) => {
+  if (!grade) return null;
+  const assessments = Array.isArray(grade.skillAssessments) ? grade.skillAssessments : [];
+  const top = topLevel(assessments);
+  return (
+    <div className="border border-[#E3E3E3] rounded-lg bg-[#FBFBFE] p-3 mb-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">What the coach graded</div>
+      {grade.gradeError ? (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">{GRADE_ERROR_TEXT}</div>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            {grade.passed
+              ? <Chip tone="green">✓ passed</Chip>
+              : <Chip tone="red">✗ not passed</Chip>}
+            {gradeReason(grade) && <span className="text-xs text-slate-600">{gradeReason(grade)}</span>}
+            {top != null && <Chip tone="slate">🏅 {levelLabel(top)}</Chip>}
+            {grade.gradeSamples > 1 && <Chip tone="slate">consensus of {grade.gradeSamples} re-grades</Chip>}
+          </div>
+          {assessments.length > 0
+            ? <SkillAssessmentTable assessments={assessments} />
+            : <p className="text-xs text-slate-400 italic">Legacy grade — no per-skill Dreyfus assessments recorded.</p>}
+        </>
+      )}
+    </div>
+  );
 };
 
 /** Per-case verdict detail panel. */
@@ -91,18 +144,36 @@ const CaseDetail = ({ token, caseId, onClose, onViewTimeline }) => {
 
       {c.error && <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded px-3 py-2 mb-3">{c.error}</div>}
 
+      <CoachGradePanel grade={c.coachGrade} />
+
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Judge verdicts</div>
       <div className="space-y-2">
-        {Object.keys(DIMENSION_LABELS).filter((d) => dims[d]).map((d) => (
-          <div key={d} className="border border-[#EEE] rounded-md p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-semibold text-slate-700">{DIMENSION_LABELS[d]}</span>
-              <Chip tone={scoreTone(dims[d].score)}>{dims[d].score}</Chip>
-              {dims[d].pass ? <Chip tone="green">pass</Chip> : <Chip tone="red">fail</Chip>}
+        {Object.keys(DIMENSION_LABELS).map((d) => {
+          const dim = dims[d];
+          if (!dim) {
+            return (
+              <div key={d} className="border border-dashed border-[#EEE] rounded-md p-3 opacity-70">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-slate-500">{DIMENSION_LABELS[d]}</span>
+                  <Chip tone="slate">not scored</Chip>
+                  {DIMENSION_ABSENT_REASON[d] && <span className="text-[11px] text-slate-400 italic">{DIMENSION_ABSENT_REASON[d]}</span>}
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={d} className="border border-[#EEE] rounded-md p-3">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="text-xs font-semibold text-slate-700">{DIMENSION_LABELS[d]}</span>
+                {OBJECTIVE_DIMENSIONS.has(d) && <Chip tone="slate">objective</Chip>}
+                <Chip tone={scoreTone(dim.score)}>{dim.score}</Chip>
+                {dim.pass ? <Chip tone="green">pass</Chip> : <Chip tone="red">fail</Chip>}
+              </div>
+              {reasons[d]?.reasoning && <p className="text-xs text-slate-600">{reasons[d].reasoning}</p>}
+              {reasons[d]?.evidence && <p className="text-[11px] text-slate-400 mt-1 italic">{reasons[d].evidence}</p>}
             </div>
-            {reasons[d]?.reasoning && <p className="text-xs text-slate-600">{reasons[d].reasoning}</p>}
-            {reasons[d]?.evidence && <p className="text-[11px] text-slate-400 mt-1 italic">{reasons[d].evidence}</p>}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -205,6 +276,99 @@ const BatchDetail = ({ token, batchId, onViewTimeline }) => {
   );
 };
 
+// One-line summary of a batch's frozen prompt snapshot, for the compare view.
+const snapshotSummary = (snap) => {
+  if (!snap) return 'legacy — no frozen prompts';
+  const t = Object.keys(snap.v2_templates || {}).length;
+  const c = Object.keys(snap.v2_config || {}).length;
+  const s = Object.keys(snap.skill_taxonomy?.skills || {}).length;
+  return `🧊 ${t} templates · ${c} config · ${s} skills`;
+};
+
+/**
+ * Side-by-side comparison of two batches — the payoff of frozen prompt
+ * snapshots: "did my prompt edit help or regress?" Compares aggregate dimension
+ * scores + pass rate + overall, and surfaces each batch's snapshot so a
+ * reviewer sees WHAT changed between the two runs.
+ */
+const BatchCompare = ({ token, batchIds }) => {
+  const [a, setA] = useState(null);
+  const [b, setB] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    setA(null); setB(null);
+    Promise.all(batchIds.map((id) => getBatch(token, id)))
+      .then(([ra, rb]) => { if (live) { setA(ra); setB(rb); } })
+      .catch(() => { /* leave loading */ });
+    return () => { live = false; };
+  }, [token, batchIds]);
+
+  if (!a || !b) return <div className="p-6 text-slate-400 text-sm">Loading comparison…</div>;
+
+  const aggA = a.batch.aggregate_scores || {};
+  const aggB = b.batch.aggregate_scores || {};
+  const dimsA = aggA.dimensions || {};
+  const dimsB = aggB.dimensions || {};
+  const dimKeys = Object.keys(DIMENSION_LABELS).filter((d) => dimsA[d] != null || dimsB[d] != null);
+
+  const deltaCell = (va, vb, unit = '') => {
+    if (va == null || vb == null) return <td className="px-3 py-2 text-slate-400">—</td>;
+    const d = vb - va;
+    const tone = d > 0 ? 'text-emerald-600' : d < 0 ? 'text-rose-600' : 'text-slate-400';
+    return <td className={`px-3 py-2 font-medium ${tone}`}>{d > 0 ? '+' : ''}{d}{unit}</td>;
+  };
+  const passPct = (agg) => (agg.pass_rate != null ? Math.round(agg.pass_rate * 100) : null);
+
+  return (
+    <div className="p-6">
+      <h2 className="text-lg font-bold text-[#1E1E1E] mb-1">Compare · #{a.batch.id} vs #{b.batch.id}</h2>
+      <p className="text-xs text-slate-500 mb-4">
+        A = #{a.batch.id} {a.batch.suite_key} ({fmtTime(a.batch.started_at)}) · B = #{b.batch.id} {b.batch.suite_key} ({fmtTime(b.batch.started_at)})
+      </p>
+
+      <table className="w-full text-xs border border-[#E3E3E3] rounded-md overflow-hidden mb-4">
+        <thead className="bg-[#F7F7F9] text-slate-600">
+          <tr>
+            <th className="text-left px-3 py-2 font-semibold">Metric</th>
+            <th className="text-left px-3 py-2 font-semibold">A · #{a.batch.id}</th>
+            <th className="text-left px-3 py-2 font-semibold">B · #{b.batch.id}</th>
+            <th className="text-left px-3 py-2 font-semibold">Δ (B − A)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-t border-[#EEE] font-semibold">
+            <td className="px-3 py-2 text-slate-800">Overall</td>
+            <td className="px-3 py-2 text-slate-700">{aggA.overall ?? '—'}</td>
+            <td className="px-3 py-2 text-slate-700">{aggB.overall ?? '—'}</td>
+            {deltaCell(aggA.overall, aggB.overall)}
+          </tr>
+          <tr className="border-t border-[#EEE] font-semibold">
+            <td className="px-3 py-2 text-slate-800">Pass rate</td>
+            <td className="px-3 py-2 text-slate-700">{passPct(aggA) != null ? `${passPct(aggA)}%` : '—'}</td>
+            <td className="px-3 py-2 text-slate-700">{passPct(aggB) != null ? `${passPct(aggB)}%` : '—'}</td>
+            {deltaCell(passPct(aggA), passPct(aggB), ' pts')}
+          </tr>
+          {dimKeys.map((d) => (
+            <tr key={d} className="border-t border-[#EEE]">
+              <td className="px-3 py-2 text-slate-700">{DIMENSION_LABELS[d]}</td>
+              <td className="px-3 py-2 text-slate-600">{dimsA[d] ?? '—'}</td>
+              <td className="px-3 py-2 text-slate-600">{dimsB[d] ?? '—'}</td>
+              {deltaCell(dimsA[d], dimsB[d])}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="text-[11px] text-slate-500 space-y-1">
+        <div><span className="font-semibold text-slate-600">A prompts:</span> {snapshotSummary(a.batch.prompt_snapshot)}</div>
+        <div><span className="font-semibold text-slate-600">B prompts:</span> {snapshotSummary(b.batch.prompt_snapshot)}</div>
+        <p className="text-slate-400 pt-1">Green Δ = batch B scored higher. Both batches froze their prompts, so a score change reflects the prompt/config edit, not drift.</p>
+      </div>
+    </div>
+  );
+};
+
 const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
   const token = useAuthStore((s) => s.token);
   const { canAccessPage } = usePermissions();
@@ -217,7 +381,18 @@ const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
   const [judgeModel, setJudgeModel] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareIds, setCompareIds] = useState([]);
   const pollRef = useRef(null);
+
+  const selectedSuite = suites.find((s) => s.key === suiteKey) || null;
+
+  // In compare mode, clicking a batch toggles it into a max-2 selection instead
+  // of opening it. Third pick drops the oldest.
+  const toggleCompare = (id) => {
+    setCompareIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id].slice(-2));
+  };
 
   const loadBatches = useCallback(async () => {
     const d = await listBatches(token);
@@ -303,7 +478,29 @@ const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
         >
           {running ? 'Starting…' : 'Run eval'}
         </button>
+        <button
+          onClick={() => { setCompareMode((m) => !m); setCompareIds([]); }}
+          className={`text-sm font-medium rounded-md px-4 py-2 border ${compareMode ? 'text-white border-transparent' : 'text-slate-700 border-[#E3E3E3] bg-white'}`}
+          style={compareMode ? { backgroundColor: BRAND } : undefined}
+          title="Pick two batches to compare their scores side by side"
+        >
+          {compareMode ? 'Exit compare' : 'Compare batches'}
+        </button>
         {error && <span className="text-xs text-rose-600">{error}</span>}
+
+        {/* Selected-suite metadata (focus + coverage) so the reviewer knows what
+            the run will exercise before starting it. */}
+        {selectedSuite && (
+          <div className="w-full text-[11px] text-slate-500 pt-1">
+            {selectedSuite.personaCount} persona{selectedSuite.personaCount === 1 ? '' : 's'} × {selectedSuite.taskCount} task{selectedSuite.taskCount === 1 ? '' : 's'}
+            {selectedSuite.focus && <span className="text-slate-400"> · {selectedSuite.focus}</span>}
+          </div>
+        )}
+        {compareMode && (
+          <div className="w-full text-[11px] text-indigo-600 pt-0.5">
+            Compare mode — select two batches from the list ({compareIds.length}/2 selected).
+          </div>
+        )}
       </div>
 
       <div className="flex flex-1 min-h-0">
@@ -311,12 +508,15 @@ const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
         <aside className="w-80 shrink-0 border-r border-[#E3E3E3] bg-white overflow-y-auto min-h-0">
           {batches.length === 0 && <div className="p-4 text-slate-400 text-sm">No eval batches yet.</div>}
           {batches.map((b) => {
-            const active = selectedBatch === b.id;
+            const active = compareMode ? compareIds.includes(b.id) : selectedBatch === b.id;
             const agg = b.aggregate_scores || {};
             return (
-              <button key={b.id} onClick={() => setSelectedBatch(b.id)} className={`w-full text-left px-4 py-3 border-b border-[#F0F0F0] hover:bg-[#F7F7F9] ${active ? 'bg-[#F0F0FF]' : ''}`}>
+              <button key={b.id} onClick={() => (compareMode ? toggleCompare(b.id) : setSelectedBatch(b.id))} className={`w-full text-left px-4 py-3 border-b border-[#F0F0F0] hover:bg-[#F7F7F9] ${active ? 'bg-[#F0F0FF]' : ''}`}>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-slate-800">#{b.id} {b.suite_key}</span>
+                  <span className="text-sm font-semibold text-slate-800">
+                    {compareMode && <span className="mr-1">{compareIds.includes(b.id) ? '☑' : '☐'}</span>}
+                    #{b.id} {b.suite_key}
+                  </span>
                   <StatusBadge status={b.status} />
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
@@ -330,7 +530,13 @@ const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
         </aside>
 
         <main className="flex-1 min-h-0 overflow-y-auto bg-[#EFEFEF]">
-          {selectedBatch ? (
+          {compareMode ? (
+            compareIds.length === 2 ? (
+              <BatchCompare token={token} batchIds={compareIds} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-400 text-sm">Select two batches to compare.</div>
+            )
+          ) : selectedBatch ? (
             <BatchDetail token={token} batchId={selectedBatch} onViewTimeline={onViewTimeline} />
           ) : (
             <div className="h-full flex items-center justify-center text-slate-400 text-sm">Run a suite or select a batch.</div>
