@@ -16,6 +16,7 @@ const InfoSessionsTab = lazy(() => import('./components/InfoSessionsTab/InfoSess
 const WorkshopsTab = lazy(() => import('./components/WorkshopsTab/WorkshopsTab'));
 const LeadsTab = lazy(() => import('./components/LeadsTab/LeadsTab'));
 const EmailsTab = lazy(() => import('./components/EmailsTab/EmailsTab'));
+const ReturningTab = lazy(() => import('./components/ReturningTab/ReturningTab'));
 const SettingsTab = lazy(() => import('./components/SettingsTab/SettingsTab'));
 
 const AdmissionsDashboard = () => {
@@ -31,10 +32,33 @@ const AdmissionsDashboard = () => {
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
     const tabParam = searchParams.get('tab');
-    if (tabParam && ['overview', 'applications', 'info-sessions', 'workshops', 'leads', 'emails', 'settings'].includes(tabParam)) {
+    if (tabParam && ['overview', 'applications', 'info-sessions', 'workshops', 'leads', 'emails', 'returning', 'settings'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [location.search]);
+
+  // Returning & Deferred data lives at the dashboard level (not inside the tab) because the
+  // tab TRIGGER shows the needs-outreach count — the badge is what stops the queue from being
+  // a page nobody opens. One fetch feeds both the badge and the tab body.
+  const [returningData, setReturningData] = useState(null);
+  const [returningLoading, setReturningLoading] = useState(true);
+  const [returningError, setReturningError] = useState(null);
+  const fetchReturningApplicants = React.useCallback(async () => {
+    if (!token) return;
+    try {
+      setReturningError(null);
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/admissions/dashboard/returning-applicants`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch returning applicants');
+      setReturningData(await res.json());
+    } catch (e) {
+      setReturningError(e.message);
+    } finally {
+      setReturningLoading(false);
+    }
+  }, [token]);
+  useEffect(() => { fetchReturningApplicants(); }, [fetchReturningApplicants]);
 
   // Data state
   const [stats, setStats] = useState(null);
@@ -941,7 +965,7 @@ const AdmissionsDashboard = () => {
       <div className="flex-1 overflow-hidden flex flex-col">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="h-full flex flex-col">
           <div className="px-6 pt-4 pb-0 shrink-0">
-            <TabsList className="grid w-full grid-cols-7 bg-white border border-gray-200">
+            <TabsList className="grid w-full grid-cols-8 bg-white border border-gray-200">
             <TabsTrigger 
               value="overview" 
               className="font-proxima data-[state=active]:bg-[#4242ea] data-[state=active]:text-white"
@@ -977,6 +1001,17 @@ const AdmissionsDashboard = () => {
               className="font-proxima data-[state=active]:bg-[#4242ea] data-[state=active]:text-white"
             >
               Emails
+            </TabsTrigger>
+            <TabsTrigger
+              value="returning"
+              className="font-proxima data-[state=active]:bg-[#4242ea] data-[state=active]:text-white"
+            >
+              Returning
+              {returningData?.needsOutreachCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-amber-500 text-white text-xs font-proxima-bold">
+                  {returningData.needsOutreachCount}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger
               value="settings"
@@ -1196,6 +1231,22 @@ const AdmissionsDashboard = () => {
                 emailMappingsLoading={emailMappingsLoading}
                 fetchEmailMappings={fetchEmailMappings}
                 token={token}
+              />
+            </Suspense>
+          </TabsContent>
+
+          <TabsContent value="returning" className="flex-1 overflow-auto px-6 py-4">
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-12">
+                <div className="text-gray-500 font-proxima">Loading Returning Applicants...</div>
+              </div>
+            }>
+              <ReturningTab
+                token={token}
+                data={returningData}
+                loading={returningLoading}
+                error={returningError}
+                refetch={fetchReturningApplicants}
               />
             </Suspense>
           </TabsContent>
