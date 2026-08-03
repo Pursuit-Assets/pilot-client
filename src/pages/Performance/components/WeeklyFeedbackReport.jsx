@@ -437,6 +437,11 @@ const WeeklyFeedbackReport = ({ userId, token }) => {
                 accent
               />
             )}
+
+            {/* Footer */}
+            {report.footer && (
+              <p className="text-xs text-gray-400 italic font-proxima text-center pb-2">{report.footer}</p>
+            )}
           </>
         )}
       </div>
