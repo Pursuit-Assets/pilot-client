@@ -136,7 +136,7 @@ export const useTaskInsights = (token, startDate, endDate) => {
 };
 
 // ──────────────────────────────────────────────────────────────
-// Integration status hooks (Render + Netlify)
+// Integration status hooks (Render server + Render client static site)
 // ──────────────────────────────────────────────────────────────
 
 export const useWeeklyFeedbackLastRun = (token) => {
@@ -177,10 +177,12 @@ export const useRenderLogs = (token, enabled = false) => {
   });
 };
 
-export const useNetlifyStatus = (token) => {
+// The deployed pilot-client static site on Render. Replaced useNetlifyStatus — the
+// frontend moved off Netlify to Render and that site was deleted 2026-07-27.
+export const useRenderClientStatus = (token) => {
   return useQuery({
-    queryKey: ['integrations', 'netlify-status', token],
-    queryFn: () => fetchWithAuth(`${BASE}/integrations/netlify-status`, token),
+    queryKey: ['integrations', 'render-client-status', token],
+    queryFn: () => fetchWithAuth(`${BASE}/integrations/render-client-status`, token),
     enabled: !!token,
     refetchInterval: 60_000,
     staleTime: 30_000,
