@@ -7,7 +7,7 @@ React 19 SPA for Pursuit's learning management platform. Serves builders (learne
 - **Entry**: `src/main.jsx` → `src/App.jsx` (routes + providers)
 - **Build**: Vite 6 — `npm run dev` (port 5173), `npm run build`
 - **Test**: `npm test` (Vitest), `npm run test:ui`, `npm run test:coverage`
-- **Deploy**: Netlify (`netlify.toml`); Node 20, npm 10.9.0
+- **Deploy**: Render static site `pursuit-client` (`srv-d9d9n6d7vvec73f07d60`) — auto-deploys on every commit to `main`, builds `npm run build`, publishes `dist`, served at **platform.pursuit.org**; Node 20, npm 10.9.0. See "Deployment" below.
 - **Partner repo**: `../test-pilot-server` (Express backend on port 7001)
 
 ## Architecture
@@ -263,6 +263,24 @@ The V2 Coach APPLY-phase deliverable panel (`src/pages/Learning/components/Deliv
 
 - `VITE_API_URL` — backend base URL (required)
 - `VITE_GOOGLE_MAPS_API_KEY` — Google Maps for address autocomplete
+
+## Deployment (Render)
+
+Migrated off Netlify to Render (`chore: migrate frontend deploy config from Netlify to Render`, 6d33191); `netlify.toml` is gone and the `pursuit-ai-native` Netlify site was **deleted 2026-07-27**. Live service, verified against the Render API 2026-07-30:
+
+| | |
+|---|---|
+| Service | `pursuit-client` — `srv-d9d9n6d7vvec73f07d60`, type `static_site` |
+| Repo / branch | `Pursuit-Assets/pilot-client` @ `main`, `autoDeploy: yes` on every commit |
+| Build / publish | `npm run build` → `dist` |
+| Live domain | **`platform.pursuit.org`** (custom domain, verified) |
+| Render slug | `pursuit-client-sny4.onrender.com` |
+
+**`render.yaml` is NOT the source of truth and currently drifts from the live service.** The service was created by hand in the dashboard, and the blueprint only takes effect if the repo is connected as a Blueprint (it isn't) — the file says so itself. Two concrete divergences: the blueprint names the service `pilot-client` (live: `pursuit-client`) and its `buildCommand` is `rm -rf node_modules package-lock.json && npm install && npm run build` (live: plain `npm run build`). **Changing `render.yaml` therefore does not change how this app deploys** — edit the dashboard. The SPA rewrite (`/*` → `/index.html`) is likewise dashboard-side and is working: `/login`, `/workshops`, `/info-sessions`, `/unsubscribe` all return 200.
+
+A second custom domain, `onrender.pursuit.org`, is attached but **`verificationStatus: unverified`** — it does not serve traffic. Don't reference it in emails or docs; `platform.pursuit.org` is the canonical origin (the server's `utils/frontendUrl.js` resolves to it).
+
+**Deploy status is surfaced in-app** on Platform Analytics → Integrations as the **Render Client** card (`GET /api/admin/platform-analytics/integrations/render-client-status`, server `renderService.getStaticSiteStatus`). Health there is the *live deploy's* status, not process health — a static site has no running process, which is why (unlike the Render Server card) it has no expandable logs panel.
 
 ## Client-Server Contract
 
