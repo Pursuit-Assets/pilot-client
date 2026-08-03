@@ -340,3 +340,140 @@ describe('BuilderSnapshot', () => {
     expect(screen.getByLabelText(/search builders/i)).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regressions found on Dennys Antunish's real snapshot (2026-07-28). Each of
+// these silently showed a builder as weaker than the data said, or dropped the
+// data entirely.
+// ---------------------------------------------------------------------------
+const LONG_SUMMARY =
+  'Dennys demonstrated a solid conceptual grasp of LLM hallucination and its practical ' +
+  'implications, and produced a coherent final answer after coach scaffolding. His ' +
+  'verification instincts are directionally correct but not yet risk-prioritized.';
+const TRAJECTORY =
+  'Consistent with prior sessions: Dennys engages and produces usable material when ' +
+  'scaffolded step-by-step, but does not volunteer structure or synthesis independently.';
+
+const REAL_SHAPE_SNAPSHOT = {
+  ...FULL_SNAPSHOT,
+  full_name: 'Dennys Antunish',
+  cohort_name: 'L1 - July 2026',
+  recent_apply_outcomes: [
+    { task_id: 8573, task_title: 'Learn: What Is AI and How AI Learns', overall_score: 30, passed: true },
+  ],
+  profile: {
+    ...FULL_SNAPSHOT.profile,
+    learning_modality_preferences: { preferred: 'experiential' },
+    performance: {
+      entries: [
+        {
+          date: '2026-07-06',
+          task_id: 8573,
+          summary: LONG_SUMMARY,
+          trajectory_note: TRAJECTORY,
+          what_went_well: 'Correctly explained hallucination as statistical prediction.',
+          what_to_improve: 'Front-load verification by stakes rather than familiarity.',
+          overall_score: 30,
+          passed: true,
+        },
+      ],
+    },
+    // Production shape: by_skill values are the evidence ARRAY itself, and each
+    // entry's text lives in `evidence` (NOT `summary`).
+    competencies: {
+      by_skill: {
+        'write-structure-prompts': [
+          { at: '2026-07-07', task_id: 8577, evidence: 'Produced a structurally complete prompt.', confidence: 0.65 },
+        ],
+        'reason-about-models': [
+          { at: '2026-06-23', task_id: null, evidence: 'Onboarding conversation (unverified prior)', confidence: 0.3 },
+          { at: '2026-07-06', task_id: 8573, evidence: 'Described a sequential checklist rather than a deliberate plan.', confidence: 0.55 },
+          { at: '2026-07-15', task_id: 8634, evidence: 'Wrote a complete, structured AI prompt in the final challenge.', confidence: 0.6 },
+        ],
+      },
+    },
+  },
+};
+
+const renderRealShape = async () => {
+  currentSearch = 'userId=729';
+  setRoutes({ snapshot: okResponse(REAL_SHAPE_SNAPSHOT) });
+  await act(async () => { renderUI(); });
+  await screen.findByText('Dennys Antunish');
+};
+
+describe('Recent Performance timeline', () => {
+  it('shows the FULL summary when expanded (the collapsed row truncates it)', async () => {
+    await renderRealShape();
+    // Collapsed: the truncated copy exists, but the trajectory note does not.
+    expect(screen.queryByText(TRAJECTORY)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { expanded: false, name: /Dennys demonstrated/ }));
+
+    // Expanded: summary is repeated in full, so the sentence can be finished.
+    expect(screen.getAllByText(LONG_SUMMARY).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders the grader's trajectory note, which was captured but never displayed", async () => {
+    await renderRealShape();
+    fireEvent.click(screen.getByRole('button', { expanded: false, name: /Dennys demonstrated/ }));
+    expect(screen.getByText(TRAJECTORY)).toBeInTheDocument();
+    expect(screen.getByText(/Pattern over time/i)).toBeInTheDocument();
+  });
+
+  it('resolves the task title from recent_apply_outcomes instead of showing a bare date', async () => {
+    await renderRealShape();
+    expect(screen.getByText('Learn: What Is AI and How AI Learns')).toBeInTheDocument();
+  });
+
+  it('shows a pass outcome, never the derived 0-100 score', async () => {
+    await renderRealShape();
+    // passed:true with overall_score:30 — the old chip rendered "30" in amber,
+    // presenting a pass as a near-failure. There is no 0-100 pass bar.
+    expect(screen.getByText('✓ Passed')).toBeInTheDocument();
+    expect(screen.queryByText('30')).not.toBeInTheDocument();
+  });
+});
+
+describe('Strongest Skills panel', () => {
+  it('renders the most recent EVIDENCE (the old code read a `summary` key that never existed)', async () => {
+    await renderRealShape();
+    expect(screen.getByText(/Wrote a complete, structured AI prompt/)).toBeInTheDocument();
+  });
+
+  it('ranks by Dreyfus level, not evidence count', async () => {
+    await renderRealShape();
+    // reason-about-models has the MOST observations (2 graded) but level 1;
+    // write-structure-prompts has 1 observation at level 4. Level must win —
+    // ranking by count crowned the weakest skill as the top achievement.
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    const strongest = headings.indexOf('Write & Structure Prompts');
+    const weakest = headings.indexOf('Reason About Models');
+    expect(strongest).toBeGreaterThanOrEqual(0);
+    expect(strongest).toBeLessThan(weakest);
+    expect(screen.getByText(/L4 Proficient/)).toBeInTheDocument();
+  });
+
+  it('excludes onboarding priors (task_id: null) from the observation count', async () => {
+    await renderRealShape();
+    // reason-about-models has 3 evidence rows, one of which is an onboarding
+    // prior — only the 2 graded observations should count.
+    expect(screen.getByText('2 observations')).toBeInTheDocument();
+    expect(screen.queryByText(/Onboarding conversation/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Hero + story cards', () => {
+  it('leads with the Dreyfus stage, not a "1.6 / 5" fraction', async () => {
+    await renderRealShape();
+    // levels 4,3,1,2 → mean 2.5 → round → 3 Competent.
+    expect(screen.getByText('Proficiency Stage')).toBeInTheDocument();
+    expect(screen.getByText('Competent')).toBeInTheDocument();
+    expect(screen.queryByText(/^\d+(\.\d+)? \/ 5$/)).not.toBeInTheDocument();
+  });
+
+  it('labels every teaching method in the 6-wide enum, not just three', async () => {
+    await renderRealShape();
+    expect(screen.getByText('Prefers Experiential')).toBeInTheDocument();
+  });
+});

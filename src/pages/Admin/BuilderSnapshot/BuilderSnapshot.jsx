@@ -11,6 +11,10 @@ import BuilderSnapshotTimeline from './components/BuilderSnapshotTimeline';
 
 const BRAND = '#4242EA';
 
+// Dreyfus 0-5 stage names. Mirrors DREYFUS_LABELS in BuilderSnapshotSkillsPanel
+// and the server's queries/skillProficiency.js — index IS the level.
+const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
+
 // ---------------------------------------------------------------------------
 // composeSummary — picks the best already-written prose for the hero band.
 // The earlier version stitched first-sentence-of-background + lowercased
@@ -309,8 +313,20 @@ const BuilderSnapshot = ({ embedded = false }) => {
       ? profile.performance.entries.length
       : 0;
 
+    // Lead with the STAGE, not the fraction. Dreyfus is an ordinal ladder, and
+    // "1.6 / 5" reads as 32% — a failing grade — when Advanced Beginner four
+    // weeks into L1 is exactly on track. The mean is still shown, demoted to the
+    // hint where it reads as a position on the ladder rather than a score.
+    const stage = avg != null ? DREYFUS_LABELS[Math.round(avg)] : null;
+
     return [
-      { label: 'Avg Proficiency', value: avg != null ? `${avg} / 5` : '—', hint: avg != null ? 'Dreyfus, across assessed skills' : 'no scores yet' },
+      {
+        label: 'Proficiency Stage',
+        value: stage || '—',
+        hint: avg != null
+          ? `Dreyfus ${avg} of 5 · ${dreyfusLevels.length || 'no'} skill${dreyfusLevels.length === 1 ? '' : 's'} assessed`
+          : 'no skills assessed yet',
+      },
       { label: 'Competency Signals', value: `${competencyCount}`, hint: `from ${Object.keys(profile.competencies?.by_skill || {}).length} skills` },
       { label: 'Performance Entries', value: `${performanceCount}`, hint: performanceCount > 0 ? 'most recent log' : 'none yet' },
     ];
@@ -461,9 +477,13 @@ const BuilderSnapshot = ({ embedded = false }) => {
             <BuilderSnapshotAchievements
               competencies={snapshot.profile?.competencies}
               skillTaxonomy={taxonomy}
+              skillProficiency={snapshot.profile?.skill_proficiency}
             />
 
-            <BuilderSnapshotTimeline performance={snapshot.profile?.performance} />
+            <BuilderSnapshotTimeline
+              performance={snapshot.profile?.performance}
+              applyOutcomes={snapshot.recent_apply_outcomes}
+            />
           </div>
         )}
       </div>

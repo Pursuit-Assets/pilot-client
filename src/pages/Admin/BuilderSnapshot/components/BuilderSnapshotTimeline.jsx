@@ -28,31 +28,47 @@ const fmtDate = (iso) => {
   }
 };
 
-const ScoreChip = ({ score, passed }) => {
-  if (typeof score !== 'number') return null;
-  const isPass = passed === true || (passed == null && score >= 70);
-  const isStrong = score >= 80;
-  const tone = isStrong
-    ? { bg: 'bg-[#4242EA]/10', text: 'text-[#4242EA]', ring: 'ring-[#4242EA]/30' }
-    : isPass
-    ? { bg: 'bg-emerald-50', text: 'text-emerald-700', ring: 'ring-emerald-200' }
-    : { bg: 'bg-amber-50', text: 'text-amber-700', ring: 'ring-amber-200' };
+/**
+ * OutcomeChip — pass/not-passed, NEVER a 0-100 number.
+ *
+ * `overall_score` is a DERIVED value (mean Dreyfus level / 5 × 100), not a
+ * grade, and there is no 0-100 pass bar anywhere in the engine — pass/fail is
+ * window-relative (held-or-improved vs the builder's own prior level). This
+ * chip used to render the raw score and colour it amber below 70, so every one
+ * of Dennys Antunish's 21 tasks — all `passed: true`, scoring 20-60 — displayed
+ * as a near-failure. CoachRuns went Dreyfus-first for exactly this reason
+ * (2026-07-07); the snapshot had never followed.
+ */
+const OutcomeChip = ({ passed }) => {
+  if (passed == null) return null;
+  const tone = passed
+    ? { bg: 'bg-emerald-50', text: 'text-emerald-700', ring: 'ring-emerald-200', label: '✓ Passed' }
+    : { bg: 'bg-amber-50', text: 'text-amber-700', ring: 'ring-amber-200', label: '✗ Not passed' };
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full ring-1 ${tone.bg} ${tone.text} ${tone.ring} px-2.5 py-0.5 text-[11px] font-proxima-bold tabular-nums`}
-      title={`Overall score ${score}/100`}
+      className={`inline-flex items-center gap-1 rounded-full ring-1 ${tone.bg} ${tone.text} ${tone.ring} px-2.5 py-0.5 text-[11px] font-proxima-bold`}
+      title="Pass is window-relative: the builder held or improved on a majority of the skills this task assessed."
     >
-      {score}
+      {tone.label}
     </span>
   );
 };
 
 const ExpandedDetail = ({ entry }) => {
+  const summary = (entry.summary || '').trim();
   const wentWell = (entry.what_went_well || '').trim();
   const toImprove = (entry.what_to_improve || '').trim();
+  const trajectory = (entry.trajectory_note || '').trim();
 
   return (
     <div className="mt-3 pl-0 sm:pl-36 space-y-3">
+      {/* The collapsed row truncates the summary to one line. Repeat it in full
+          here — previously the expanded view showed only went-well / to-improve,
+          so the summary sentence could never be finished no matter what you
+          clicked. */}
+      {summary && (
+        <p className="text-sm leading-relaxed text-[#1E1E1E]/90">{summary}</p>
+      )}
       {wentWell && (
         <div className="rounded-lg bg-emerald-50/60 ring-1 ring-emerald-100 p-3">
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider font-proxima-bold text-emerald-700">
@@ -71,7 +87,20 @@ const ExpandedDetail = ({ entry }) => {
           <p className="mt-1.5 text-sm leading-relaxed text-[#1E1E1E]/90">{toImprove}</p>
         </div>
       )}
-      {!wentWell && !toImprove && (
+      {/* The grader's cross-session read — the one field that connects this task
+          to the builder's pattern over time ("the same pattern seen in the
+          market scan task reappears here"). It was captured on every entry and
+          rendered nowhere. */}
+      {trajectory && (
+        <div className="rounded-lg bg-[#4242EA]/[0.04] ring-1 ring-[#4242EA]/15 p-3">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider font-proxima-bold text-[#4242EA]">
+            <TrendingUp className="w-3.5 h-3.5" />
+            Pattern over time
+          </div>
+          <p className="mt-1.5 text-sm leading-relaxed text-[#1E1E1E]/90">{trajectory}</p>
+        </div>
+      )}
+      {!summary && !wentWell && !toImprove && !trajectory && (
         <p className="text-xs italic text-[#999]">
           No detailed feedback captured for this entry.
         </p>
@@ -80,7 +109,19 @@ const ExpandedDetail = ({ entry }) => {
   );
 };
 
-const BuilderSnapshotTimeline = ({ performance, max = 8 }) => {
+const BuilderSnapshotTimeline = ({ performance, applyOutcomes, max = 8 }) => {
+  // Performance entries carry only a task_id. The snapshot endpoint ALSO returns
+  // recent_apply_outcomes with a resolved task_title (LEFT JOIN tasks) — the
+  // client had simply never read it, so every row showed a bare date. Index the
+  // titles by task_id and attach them.
+  const titleByTaskId = useMemo(() => {
+    const map = new Map();
+    for (const o of Array.isArray(applyOutcomes) ? applyOutcomes : []) {
+      if (o?.task_id != null && o.task_title) map.set(o.task_id, o.task_title);
+    }
+    return map;
+  }, [applyOutcomes]);
+
   const items = useMemo(() => {
     const entries = Array.isArray(performance?.entries) ? performance.entries : [];
     return [...entries]
@@ -89,8 +130,9 @@ const BuilderSnapshotTimeline = ({ performance, max = 8 }) => {
         const db = new Date(b?.date || b?.at || 0).getTime();
         return db - da;
       })
-      .slice(0, max);
-  }, [performance, max]);
+      .slice(0, max)
+      .map((e) => ({ ...e, task_title: titleByTaskId.get(e?.task_id) || null }));
+  }, [performance, max, titleByTaskId]);
 
   // Track which rows are expanded by index. Multiple can be open at once so
   // staff can compare adjacent entries.
@@ -104,8 +146,11 @@ const BuilderSnapshotTimeline = ({ performance, max = 8 }) => {
     });
   };
 
+  // The summary is truncated in the collapsed row, so an entry with ONLY a
+  // summary is still worth expanding — the expanded view repeats it in full.
   const hasAnyDetail = (entry) =>
-    !!(entry.what_went_well?.trim() || entry.what_to_improve?.trim());
+    !!(entry.summary?.trim() || entry.what_went_well?.trim() ||
+       entry.what_to_improve?.trim() || entry.trajectory_note?.trim());
 
   return (
     <section className="rounded-2xl ring-1 ring-[#E3E3E3] shadow-md bg-white p-6 md:p-8 font-proxima">
@@ -166,11 +211,18 @@ const BuilderSnapshotTimeline = ({ performance, max = 8 }) => {
                       {fmtDate(entry.date || entry.at) || '—'}
                     </time>
                     <div className="mt-1 sm:mt-0 flex-1 flex items-center justify-between gap-3 min-w-0">
-                      <p className="text-sm leading-snug text-[#1E1E1E]/90 truncate">
-                        {entry.summary || <span className="italic text-[#999]">No summary</span>}
-                      </p>
+                      <div className="min-w-0">
+                        {entry.task_title && (
+                          <p className="text-sm font-proxima-bold leading-snug text-[#1E1E1E] truncate">
+                            {entry.task_title}
+                          </p>
+                        )}
+                        <p className={`text-sm leading-snug text-[#1E1E1E]/70 truncate ${entry.task_title ? 'mt-0.5' : ''}`}>
+                          {entry.summary || <span className="italic text-[#999]">No summary</span>}
+                        </p>
+                      </div>
                       <div className="shrink-0 flex items-center gap-2">
-                        <ScoreChip score={entry.overall_score} passed={entry.passed} />
+                        <OutcomeChip passed={entry.passed} />
                         {expandable && (
                           isOpen ? (
                             <ChevronUp className="w-4 h-4 text-[#999]" />
