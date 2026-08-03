@@ -237,15 +237,6 @@ const WeeklyFeedbackReport = ({ userId, token }) => {
               />
             )}
 
-            {/* 3a. Task Completion (legacy field name) */}
-            {report.task_completion && (
-              <SectionCard
-                title="Task Completion"
-                headline={report.task_completion.headline}
-                body={report.task_completion.body}
-              />
-            )}
-
             {/* 3. Incomplete Reminders */}
             {report.incomplete_reminders && (
               <SectionCard
@@ -271,36 +262,6 @@ const WeeklyFeedbackReport = ({ userId, token }) => {
                         <li key={i}>{typeof item === 'string' ? item : item.title || item.name || JSON.stringify(item)}</li>
                       ))}
                     </ul>
-                  </div>
-                )}
-              </SectionCard>
-            )}
-
-            {/* 4a. Graded Assignments (legacy field name) */}
-            {report.graded_assignments && (
-              <SectionCard
-                title="Graded Assignments"
-                headline={report.graded_assignments.headline}
-                body={report.graded_assignments.body}
-              >
-                {report.graded_assignments.strengths?.length > 0 && (
-                  <div className="mt-2">
-                    <p className="text-xs text-gray-500 font-proxima mb-1">Strengths</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {report.graded_assignments.strengths.map((s, i) => (
-                        <BadgePill key={i} label={s.label} subtitle={s.explanation} color="green" />
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {report.graded_assignments.growth_areas?.length > 0 && (
-                  <div className="mt-2">
-                    <p className="text-xs text-gray-500 font-proxima mb-1">Growth Areas</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {report.graded_assignments.growth_areas.map((g, i) => (
-                        <BadgePill key={i} label={g.label} subtitle={g.explanation} color="amber" />
-                      ))}
-                    </div>
                   </div>
                 )}
               </SectionCard>
