@@ -742,12 +742,15 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                     {(() => {
                       const v = graphConfig.editable.dreyfusLegacyThresholds.value || {};
+                      // A missing key (config row not seeded yet, or hand-edited to drop a
+                      // level) must not render "< undefined" — that reads like a real bound.
+                      const t = (lvl) => (v[lvl] ?? '?');
                       const LEVELS = [
-                        [1, 'Novice', `> 0 and < ${v[2]}`],
-                        [2, 'Advanced Beginner', `≥ ${v[2]} and < ${v[3]}`],
-                        [3, 'Competent', `≥ ${v[3]} and < ${v[4]}`],
-                        [4, 'Proficient', `≥ ${v[4]} and < ${v[5]}`],
-                        [5, 'Expert', `≥ ${v[5]}`],
+                        [1, 'Novice', `> 0 and < ${t(2)}`],
+                        [2, 'Advanced Beginner', `≥ ${t(2)} and < ${t(3)}`],
+                        [3, 'Competent', `≥ ${t(3)} and < ${t(4)}`],
+                        [4, 'Proficient', `≥ ${t(4)} and < ${t(5)}`],
+                        [5, 'Expert', `≥ ${t(5)}`],
                       ];
                       return LEVELS.map(([lvl, name, range]) => (
                         <div key={lvl} className="bg-[#F5F5F5] rounded-lg p-2 flex items-center gap-2">
