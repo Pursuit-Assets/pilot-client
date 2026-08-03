@@ -4,6 +4,7 @@ import useAuthStore from '../../../stores/authStore';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { listSuites, runEval, listBatches, getBatch, getCase } from '../../../services/coachEvalsApi';
 import { SkillAssessmentTable, gradeReason, topLevel, levelLabel, GRADE_ERROR_TEXT } from '../coachDreyfus';
+import { LLM_MODELS } from '../../../constants/llmModels';
 
 const BRAND = '#4242EA';
 
@@ -47,6 +48,10 @@ const DIMENSION_SHORT = {
 // grading_consistency is objective (computed level-stability), not an LLM
 // opinion — flag it so reviewers read its score differently.
 const OBJECTIVE_DIMENSIONS = new Set(['grading_consistency']);
+
+// The Coach model + Judge model pickers reuse the shared LLM_MODELS roster
+// (imported above) so they stay in sync with the Learning/GPT pickers; blank =
+// production default. See the run-bar <select>s below.
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString() : '—');
 const scoreTone = (s) => (s == null ? 'slate' : s >= 80 ? 'green' : s >= 60 ? 'amber' : 'red');
@@ -463,12 +468,18 @@ const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
           </select>
         </label>
         <label className="text-xs text-slate-500">
-          <div className="mb-1">Model under test (optional)</div>
-          <input value={modelUnderTest} onChange={(e) => setModelUnderTest(e.target.value)} placeholder="default" className="text-sm border border-[#E3E3E3] rounded-md px-2 py-1.5 w-56" />
+          <div className="mb-1">Coach model <span className="text-slate-400">(what the coach runs on)</span></div>
+          <select value={modelUnderTest} onChange={(e) => setModelUnderTest(e.target.value)} className="text-sm border border-[#E3E3E3] rounded-md px-2 py-1.5 w-56">
+            <option value="">Default (production coach model)</option>
+            {LLM_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
         </label>
         <label className="text-xs text-slate-500">
-          <div className="mb-1">Judge model (optional)</div>
-          <input value={judgeModel} onChange={(e) => setJudgeModel(e.target.value)} placeholder="default" className="text-sm border border-[#E3E3E3] rounded-md px-2 py-1.5 w-56" />
+          <div className="mb-1">Judge model <span className="text-slate-400">(what scores the run)</span></div>
+          <select value={judgeModel} onChange={(e) => setJudgeModel(e.target.value)} className="text-sm border border-[#E3E3E3] rounded-md px-2 py-1.5 w-56">
+            <option value="">Default (independent judge)</option>
+            {LLM_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
         </label>
         <button
           onClick={handleRun}
