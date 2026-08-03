@@ -228,7 +228,15 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
 
     // Build the value payload from form data based on type.
     let value;
-    if (valueType === 'object' && key === 'difficulty_thresholds') {
+    if (valueType === 'object' && key === 'dreyfus_legacy_thresholds') {
+      // One cutoff per Dreyfus level 2-5; below the level-2 cutoff is level 1.
+      value = {
+        2: Number(formData.level2),
+        3: Number(formData.level3),
+        4: Number(formData.level4),
+        5: Number(formData.level5),
+      };
+    } else if (valueType === 'object' && key === 'difficulty_thresholds') {
       value = {
         advanced: Number(formData.advanced),
         intermediate: Number(formData.intermediate),
@@ -273,6 +281,20 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
   const configFields = (() => {
     if (!configEditTarget) return [];
     const { key, valueType, value, min, max, description } = configEditTarget;
+    if (valueType === 'object' && key === 'dreyfus_legacy_thresholds') {
+      const LEVEL_NAMES = { 2: 'Advanced Beginner', 3: 'Competent', 4: 'Proficient', 5: 'Expert' };
+      return [2, 3, 4, 5].map((lvl) => ({
+        name: `level${lvl}`,
+        label: `Level ${lvl} — ${LEVEL_NAMES[lvl]} (legacy score ≥)`,
+        type: 'number',
+        required: true,
+        defaultValue: value?.[lvl] ?? '',
+        helpText:
+          lvl === 2
+            ? 'A positive legacy score below this maps to level 1 (Novice). Cutoffs must increase from level 2 to 5.'
+            : `Legacy scores at or above this map to level ${lvl}.`,
+      }));
+    }
     if (valueType === 'object' && key === 'difficulty_thresholds') {
       return [
         {
@@ -646,6 +668,7 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
                     const cards = [
                       { row: editable.maxLearnTurns, suffix: 'turns' },
                       { row: editable.maxApplyAttempts, suffix: 'attempts' },
+                      { row: editable.dreyfusTargetOffset, suffix: 'stage(s) above current' },
                       { row: editable.evalPassThreshold, suffix: '/100' },
                       { row: editable.emaExistingWeight, suffix: '' },
                       { row: editable.emaNewWeight, suffix: '' },
@@ -681,15 +704,25 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
                 </div>
               )}
 
-              {/* Difficulty thresholds — editable object */}
-              {graphConfig.editable?.difficultyThresholds && (
+              {/* How difficulty is chosen (Dreyfus-native as of 2026-07-28) */}
+              {graphConfig.difficultyNote && (
+                <div className="bg-[#F5F5F5] rounded-lg p-3">
+                  <p className="font-proxima text-sm text-[#666]">
+                    <span className="font-proxima-bold text-[#1E1E1E]">Challenge difficulty:</span>{' '}
+                    {graphConfig.difficultyNote}
+                  </p>
+                </div>
+              )}
+
+              {/* Legacy score → Dreyfus level cutoffs — editable object */}
+              {graphConfig.editable?.dreyfusLegacyThresholds && (
                 <div>
                   <div className="flex items-center gap-1 mb-2">
-                    <p className="font-proxima text-sm text-[#666]">{graphConfig.editable.difficultyThresholds.displayName}</p>
-                    <InfoTip text={graphConfig.editable.difficultyThresholds.description} />
+                    <p className="font-proxima text-sm text-[#666]">{graphConfig.editable.dreyfusLegacyThresholds.displayName}</p>
+                    <InfoTip text={graphConfig.editable.dreyfusLegacyThresholds.description} />
                     <div className="ml-auto flex items-center gap-3">
                       <button
-                        onClick={() => openHistory('coach_v2_config', graphConfig.editable.difficultyThresholds.key, graphConfig.editable.difficultyThresholds.displayName)}
+                        onClick={() => openHistory('coach_v2_config', graphConfig.editable.dreyfusLegacyThresholds.key, graphConfig.editable.dreyfusLegacyThresholds.displayName)}
                         className="text-[#666] hover:text-[#1E1E1E] inline-flex items-center gap-1 text-xs font-proxima"
                         title="History"
                       >
@@ -697,7 +730,7 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
                       </button>
                       {canEdit && (
                         <button
-                          onClick={() => setConfigEditTarget(graphConfig.editable.difficultyThresholds)}
+                          onClick={() => setConfigEditTarget(graphConfig.editable.dreyfusLegacyThresholds)}
                           className="text-[#4242EA] hover:text-[#3232BA] inline-flex items-center gap-1 text-xs font-proxima"
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -707,19 +740,30 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <div className="bg-[#F5F5F5] rounded-lg p-2 flex items-center gap-2">
-                      <Badge variant="outline" className="font-proxima text-xs capitalize">advanced</Badge>
-                      <span className="font-mono text-xs text-[#666]">avg skill level ≥ {graphConfig.editable.difficultyThresholds.value?.advanced}</span>
-                    </div>
-                    <div className="bg-[#F5F5F5] rounded-lg p-2 flex items-center gap-2">
-                      <Badge variant="outline" className="font-proxima text-xs capitalize">intermediate</Badge>
-                      <span className="font-mono text-xs text-[#666]">≥ {graphConfig.editable.difficultyThresholds.value?.intermediate} and &lt; {graphConfig.editable.difficultyThresholds.value?.advanced}</span>
-                    </div>
-                    <div className="bg-[#F5F5F5] rounded-lg p-2 flex items-center gap-2">
-                      <Badge variant="outline" className="font-proxima text-xs capitalize">beginner</Badge>
-                      <span className="font-mono text-xs text-[#666]">&lt; {graphConfig.editable.difficultyThresholds.value?.intermediate}</span>
-                    </div>
+                    {(() => {
+                      const v = graphConfig.editable.dreyfusLegacyThresholds.value || {};
+                      // A missing key (config row not seeded yet, or hand-edited to drop a
+                      // level) must not render "< undefined" — that reads like a real bound.
+                      const t = (lvl) => (v[lvl] ?? '?');
+                      const LEVELS = [
+                        [1, 'Novice', `> 0 and < ${t(2)}`],
+                        [2, 'Advanced Beginner', `≥ ${t(2)} and < ${t(3)}`],
+                        [3, 'Competent', `≥ ${t(3)} and < ${t(4)}`],
+                        [4, 'Proficient', `≥ ${t(4)} and < ${t(5)}`],
+                        [5, 'Expert', `≥ ${t(5)}`],
+                      ];
+                      return LEVELS.map(([lvl, name, range]) => (
+                        <div key={lvl} className="bg-[#F5F5F5] rounded-lg p-2 flex items-center gap-2">
+                          <Badge variant="outline" className="font-proxima text-xs">L{lvl} {name}</Badge>
+                          <span className="font-mono text-xs text-[#666]">{range}</span>
+                        </div>
+                      ));
+                    })()}
                   </div>
+                  <p className="font-proxima text-xs text-[#999] mt-2">
+                    Only used for skills where the builder has no Dreyfus proficiency entry yet — the
+                    operative <code className="font-mono">skill_proficiency</code> level always wins.
+                  </p>
                 </div>
               )}
 

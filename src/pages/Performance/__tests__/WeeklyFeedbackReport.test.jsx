@@ -39,13 +39,9 @@ const fullReport = {
       headline: 'Perfect attendance this week',
       body: 'You attended all 5 class days.',
     },
-    task_completion: {
-      headline: '4 of 5 tasks completed',
-      body: 'Great progress overall. One task still outstanding:\n- Complete the React hooks exercise\n- Review peer code submissions',
-    },
-    graded_assignments: {
+    assignment_feedback: {
       headline: 'Strong performance on assessments',
-      body: 'Your graded work showed solid understanding of core concepts.',
+      body: 'Great progress overall. One task still outstanding:\n- Complete the React hooks exercise\n- Review peer code submissions',
       strengths: [
         { label: 'Problem Solving', explanation: 'Excellent debugging skills' },
         { label: 'Code Quality', explanation: 'Clean and readable code' },
@@ -73,6 +69,7 @@ const fullReport = {
       headline: 'Focus on testing fundamentals',
       body: 'Spend extra time this week on unit testing patterns. Consider pairing with a peer on TDD exercises.',
     },
+    footer: 'This report is AI-generated and may contain errors.',
   },
   weekNumber: 5,
   weekStartDate: '2026-03-16',
@@ -88,7 +85,7 @@ const partialReport = {
   report: {
     summary: { body: 'A quiet week.' },
     attendance: { headline: 'Missed one day', body: 'You attended 4 of 5 days.' },
-    // No task_completion, graded_assignments, peer_feedback, personal_reflections, or recommendation
+    // No assignment_feedback, peer_feedback, personal_reflections, recommendation, or footer
   },
   weekNumber: 4,
   weekStartDate: '2026-03-09',
@@ -149,17 +146,23 @@ describe('WeeklyFeedbackReport', () => {
 
     // Section: Attendance
     expect(screen.getByText('Perfect attendance this week')).toBeInTheDocument();
-    expect(screen.getByText('4 of 5 tasks completed')).toBeInTheDocument();
 
-    // Bullet items from task_completion.body
+    // Assignment Feedback — replaces the legacy task_completion / graded_assignments sections
+    expect(screen.getByText('Assignment Feedback')).toBeInTheDocument();
+    expect(screen.getByText('Strong performance on assessments')).toBeInTheDocument();
+
+    // Bullet items from assignment_feedback.body
     expect(screen.getByText('Complete the React hooks exercise')).toBeInTheDocument();
     expect(screen.getByText('Review peer code submissions')).toBeInTheDocument();
 
-    // Graded Assignments
-    expect(screen.getByText('Graded Assignments')).toBeInTheDocument();
-    expect(screen.getByText('Problem Solving')).toBeInTheDocument();
-    expect(screen.getByText('Code Quality')).toBeInTheDocument();
-    expect(screen.getByText('Testing')).toBeInTheDocument();
+    // Strengths / growth areas render as numbered "label: explanation" entries
+    expect(screen.getByText(/Problem Solving/)).toBeInTheDocument();
+    expect(screen.getByText(/Code Quality/)).toBeInTheDocument();
+    expect(screen.getByText(/Testing/)).toBeInTheDocument();
+
+    // Legacy sections are gone
+    expect(screen.queryByText('Task Completion')).not.toBeInTheDocument();
+    expect(screen.queryByText('Graded Assignments')).not.toBeInTheDocument();
 
     // Peer Feedback — strengths render as attributed quotes; growth areas no longer shown
     expect(screen.getByText('Peer Feedback')).toBeInTheDocument();
@@ -249,12 +252,12 @@ describe('WeeklyFeedbackReport', () => {
     expect(screen.getByText('Network error')).toBeInTheDocument();
   });
 
-  it('handles graded_assignments with no strengths or growth_areas', async () => {
+  it('handles assignment_feedback with no strengths or growth_areas', async () => {
     const reportWithMinimalGrades = {
       success: true,
       report: {
         summary: { body: 'Short week.' },
-        graded_assignments: {
+        assignment_feedback: {
           headline: 'Assessment results',
           body: 'You completed one assessment.',
           // No strengths or growth_areas arrays
@@ -280,5 +283,33 @@ describe('WeeklyFeedbackReport', () => {
     expect(screen.getByText('You completed one assessment.')).toBeInTheDocument();
     expect(screen.queryByText('Strengths')).not.toBeInTheDocument();
     expect(screen.queryByText('Growth Areas')).not.toBeInTheDocument();
+  });
+
+  it('renders report.footer when present', async () => {
+    mockFetchWeeks.mockResolvedValue({ success: true, weeks: mockWeeks });
+    mockFetchReport.mockResolvedValue(fullReport);
+
+    render(<WeeklyFeedbackReport userId={279} token="test-token" />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('This report is AI-generated and may contain errors.')
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('omits the footer when the report has none', async () => {
+    mockFetchWeeks.mockResolvedValue({ success: true, weeks: mockWeeks });
+    mockFetchReport.mockResolvedValue(partialReport);
+
+    render(<WeeklyFeedbackReport userId={279} token="test-token" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('A quiet week.')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByText('This report is AI-generated and may contain errors.')
+    ).not.toBeInTheDocument();
   });
 });

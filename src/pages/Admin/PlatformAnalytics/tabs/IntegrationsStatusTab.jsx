@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useMcpServerStatus, useMcpPgStatus, useMcpBqStatus } from '../hooks/useMcpStatus';
 import {
-  useExternalUsage, useRenderStatus, useRenderLogs, useNetlifyStatus, useUpdateErrorStatus,
+  useExternalUsage, useRenderStatus, useRenderLogs, useRenderClientStatus, useUpdateErrorStatus,
   useGcpServicesStatus,
 } from '../hooks/usePlatformAnalytics';
 
@@ -224,7 +224,7 @@ const IntegrationsStatusTab = ({ token, startDate, endDate }) => {
   const { data: bqData, isLoading: bqLoading, isError: bqError, refetch: refetchBq } = useMcpBqStatus();
   const { data: externalData, isLoading: extLoading } = useExternalUsage(token, startDate, endDate);
   const { data: renderData, isLoading: renderLoading, isError: renderError, refetch: refetchRender } = useRenderStatus(token);
-  const { data: netlifyData, isLoading: netlifyLoading, isError: netlifyError, refetch: refetchNetlify } = useNetlifyStatus(token);
+  const { data: clientData, isLoading: clientLoading, isError: clientError, refetch: refetchClient } = useRenderClientStatus(token);
   const { data: gcpServices, isLoading: gcpLoading, refetch: refetchGcp } = useGcpServicesStatus(token);
 
   const anthropicData = externalData?.anthropic?.usage?.data;
@@ -247,7 +247,7 @@ const IntegrationsStatusTab = ({ token, startDate, endDate }) => {
   const pgStatus = pgError ? 'error' : pgData?.status || 'loading';
   const bqStatus = bqError ? 'error' : bqData?.status || 'loading';
   const rStatus = renderError ? 'error' : renderData?.status || 'loading';
-  const nStatus = netlifyError ? 'error' : netlifyData?.status || 'loading';
+  const cStatus = clientError ? 'error' : clientData?.status || 'loading';
 
   const gcpAllOk = gcpServices?.every(s => s.status === 'ok' || s.status === 'no_health_check') ?? false;
 
@@ -256,10 +256,10 @@ const IntegrationsStatusTab = ({ token, startDate, endDate }) => {
     pgStatus === 'connected' &&
     bqStatus === 'connected' &&
     rStatus === 'ok' &&
-    nStatus === 'ok' &&
+    cStatus === 'ok' &&
     gcpAllOk;
 
-  const anyLoading = serverLoading || pgLoading || bqLoading || renderLoading || netlifyLoading || gcpLoading;
+  const anyLoading = serverLoading || pgLoading || bqLoading || renderLoading || clientLoading || gcpLoading;
 
   return (
     <div className="space-y-4">
@@ -304,32 +304,39 @@ const IntegrationsStatusTab = ({ token, startDate, endDate }) => {
           }
         />
 
-        {/* Netlify Frontend */}
+        {/* Render Client — the deployed pilot-client static site */}
         <IntegrationCard
           icon={Globe}
           iconBg="bg-emerald-600"
-          title="Netlify Frontend"
-          subtitle="pursuit-ai-native · Netlify"
-          status={nStatus}
-          latencyMs={netlifyData?.latencyMs}
-          isLoading={netlifyLoading}
-          onRefresh={refetchNetlify}
+          title="Render Client"
+          subtitle={
+            clientData?.name
+              ? `${clientData.name}${clientData.branch ? ` · ${clientData.branch}` : ''} · Static Site`
+              : 'pursuit-client · Static Site'
+          }
+          status={cStatus}
+          latencyMs={clientData?.latencyMs}
+          isLoading={clientLoading}
+          onRefresh={refetchClient}
           extra={
-            netlifyData?.siteUrl ? (
-              <a
-                href={netlifyData.siteUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-blue-500 hover:underline truncate max-w-[160px]"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {netlifyData.siteUrl.replace('https://', '')}
-              </a>
-            ) : netlifyData?.deployState ? (
-              <span className="text-xs text-slate-500">
-                Deploy: <span className="font-medium">{netlifyData.deployState}</span>
-              </span>
-            ) : null
+            <>
+              {clientData?.siteUrl && (
+                <a
+                  href={clientData.siteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-500 hover:underline truncate max-w-[160px]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {clientData.siteUrl.replace('https://', '')}
+                </a>
+              )}
+              {clientData?.deployFinishedAt && (
+                <span className="text-xs text-slate-500">
+                  Shipped <span className="font-medium">{formatTimestamp(clientData.deployFinishedAt)}</span>
+                </span>
+              )}
+            </>
           }
         />
 

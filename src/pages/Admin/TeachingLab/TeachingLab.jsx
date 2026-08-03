@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import useAuthStore from '../../../stores/authStore';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../../../components/ui/sheet';
-import { listLabPresets, classifyTeachingMethod, coachTurn } from '../../../services/onboardingLabApi';
+import { listLabPresets, classifyTeachingMethod, coachTurn, generateChallenge } from '../../../services/onboardingLabApi';
 
 const BRAND = '#4242EA';
 
@@ -54,6 +54,70 @@ const methodTone = (m) => METHOD_TONE[m] || 'slate';
 // Selectable styles for the compare view (the 6-way enum; 'demonstration' was
 // merged into 'example_based'). 'balanced' is a fallback, not a teaching choice.
 const STYLE_OPTIONS = ['socratic', 'direct', 'example_based', 'inquiry_based', 'problem_based', 'experiential'];
+
+// ---------------------------------------------------------------------------
+// Skill-level axis (Dreyfus 0-5)
+//
+// The coach picks challenge difficulty from the builder's Dreyfus level on the
+// task's skills, targeting one stage above it. These are the levels you can
+// emulate; `null` is an unassessed (brand-new) builder.
+// ---------------------------------------------------------------------------
+const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
+const DEFAULT_LEVEL_OPTIONS = [
+  ...DREYFUS_LABELS.map((label, level) => ({ level, label })),
+  { level: null, label: 'Unassessed (new builder)' },
+];
+
+// Darker = more advanced, so a row of columns reads as a ramp.
+const LEVEL_TONE = ['slate', 'slate', 'teal', 'blue', 'indigo', 'violet'];
+const levelTone = (lvl) => (Number.isInteger(lvl) ? LEVEL_TONE[lvl] : 'amber');
+const levelLabel = (lvl) =>
+  Number.isInteger(lvl) ? `L${lvl} ${DREYFUS_LABELS[lvl]}` : 'Unassessed';
+
+// Object keys can't be null, so level columns are keyed by a stable string.
+const levelKey = (lvl) => (Number.isInteger(lvl) ? `L${lvl}` : 'Lna');
+const levelFromKey = (key) => (key === 'Lna' ? null : Number(key.slice(1)));
+
+const LEVEL_DESCRIPTIONS = {
+  0: 'Below Novice — no working grasp yet; can’t follow the rules even when given them.',
+  1: 'Novice — follows explicit rules and recipes, but has no feel for context.',
+  2: 'Advanced Beginner — recognizes recurring situations and can act on them with some guidance.',
+  3: 'Competent — plans deliberately, handles the normal cases independently.',
+  4: 'Proficient — reads the whole situation, adapts fluidly, sees what matters.',
+  5: 'Expert — intuitive and fluent; can invent approaches and teach others.',
+};
+
+/**
+ * The coach's real derived decision for a column — current level, the level the
+ * challenge targets, and where the level came from. This is the engine's actual
+ * output (deriveLearnStrategy), not a re-derivation.
+ *
+ * The current→target gap is the point of the whole surface: it's why the same
+ * lesson yields a different challenge per column.
+ */
+const DecisionChips = ({ decision }) => {
+  if (!decision) return null;
+  const { currentLevel, currentLabel, targetLevel, targetLabel, levelSource } = decision;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Chip tone={levelTone(currentLevel)}>
+        {Number.isInteger(currentLevel) ? `now L${currentLevel} ${currentLabel}` : 'now — unassessed'}
+      </Chip>
+      <span className="text-slate-400 text-xs">→</span>
+      <Chip tone={levelTone(targetLevel)}>
+        {Number.isInteger(targetLevel) ? `targets L${targetLevel} ${targetLabel}` : 'targets —'}
+      </Chip>
+      {levelSource === 'unassessed' && (
+        <span
+          className="text-[10px] text-slate-400"
+          title="No proficiency or legacy score on this skill — the coach assumes Advanced Beginner, which is what a brand-new builder gets."
+        >
+          assumed
+        </span>
+      )}
+    </div>
+  );
+};
 
 // Plain-English explanation of how each style teaches (mirrors the server's
 // TEACHING_STYLE_GUIDANCE intent) — shown as a hover tooltip so the difference
@@ -222,15 +286,100 @@ const ResultView = ({ result, answer, floor }) => {
 };
 
 /**
+ * Generate + render the APPLY-phase challenge for a column.
+ *
+ * This is the payoff of the skill-level axis: the challenge is built around the
+ * per-skill Dreyfus definitions for the TARGET level, so the same lesson yields
+ * a visibly different challenge at each level. Runs the real generateApply
+ * prompt server-side.
+ *
+ * Shared by the Classify sheet and every compare column, so the two surfaces
+ * can't drift.
+ */
+const ChallengePanel = ({ token, method, level, messages }) => {
+  const [challenge, setChallenge] = useState(null);
+  const [decision, setDecision] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // The challenge follows the conversation, so a stale one would misrepresent
+  // the pairing. Clear it whenever the axis or the transcript changes.
+  useEffect(() => {
+    setChallenge(null);
+    setDecision(null);
+    setError(null);
+  }, [method, level, messages.length]);
+
+  const run = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await generateChallenge(token, {
+        teachingMethod: method,
+        skillLevel: level,
+        messages,
+      });
+      setChallenge(data.challenge);
+      setDecision(data.decision || null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-dashed border-[#D8D8E0] pt-3 mt-3">
+      {challenge ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Apply challenge
+            </span>
+            <DecisionChips decision={decision} />
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 text-sm text-slate-800">
+            <ReactMarkdown components={MD_COMPONENTS}>{challenge}</ReactMarkdown>
+          </div>
+          <button
+            onClick={run}
+            disabled={loading}
+            className="text-xs text-slate-500 hover:text-slate-800 underline disabled:opacity-50"
+          >
+            {loading ? 'Regenerating…' : 'Regenerate'}
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={run}
+            disabled={loading || messages.length === 0}
+            className="px-3 py-1.5 rounded-md text-xs font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: BRAND }}
+          >
+            {loading ? 'Designing challenge…' : 'Generate challenge'}
+          </button>
+          <span className="text-[11px] text-slate-400">
+            {messages.length === 0 ? 'Teach first, then generate.' : 'Runs the real apply-phase prompt'}
+          </span>
+        </div>
+      )}
+      {error && <p className="text-sm text-rose-600 mt-2">{error}</p>}
+    </div>
+  );
+};
+
+/**
  * Live demo (rendered inside the right-slide Sheet): actually run the coach's
  * learn phase in the classified method so staff see what it OUTPUTS, not just
  * the predicted directive. Auto-starts on mount (the Sheet opening IS the "see
  * coach in action" action); stateless multi-turn — type a builder reply to keep
  * going. Coach text renders as markdown. Remounts fresh per open via `key`.
  */
-const CoachInAction = ({ token, method }) => {
+const CoachInAction = ({ token, method, level }) => {
   const [convo, setConvo] = useState([]);
   const [task, setTask] = useState(null);
+  const [decision, setDecision] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [reply, setReply] = useState('');
@@ -242,8 +391,9 @@ const CoachInAction = ({ token, method }) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await coachTurn(token, { teachingMethod: method, messages: [] });
+      const data = await coachTurn(token, { teachingMethod: method, skillLevel: level, messages: [] });
       setTask(data.task || null);
+      setDecision(data.decision || null);
       setConvo([
         { role: 'user', content: data.seededOpener || "Hi! I'm ready to get started — can you teach me this?" },
         { role: 'assistant', content: data.reply },
@@ -253,7 +403,7 @@ const CoachInAction = ({ token, method }) => {
     } finally {
       setLoading(false);
     }
-  }, [token, method]);
+  }, [token, method, level]);
 
   // Auto-run the first coach turn when the sheet opens (once).
   useEffect(() => {
@@ -284,7 +434,7 @@ const CoachInAction = ({ token, method }) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await coachTurn(token, { teachingMethod: method, messages: next });
+      const data = await coachTurn(token, { teachingMethod: method, skillLevel: level, messages: next });
       setConvo([...next, { role: 'assistant', content: data.reply }]);
     } catch (e) {
       setError(e.message);
@@ -298,9 +448,12 @@ const CoachInAction = ({ token, method }) => {
       {/* scrollable conversation */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-3">
         {task && (
-          <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
-            <span className="font-semibold text-slate-700">Sample task:</span> {task.title}
-            {task.learning_goal ? <div className="text-slate-400 mt-0.5">{task.learning_goal}</div> : null}
+          <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-md px-3 py-2 space-y-1.5">
+            <div>
+              <span className="font-semibold text-slate-700">Sample task:</span> {task.title}
+              {task.learning_goal ? <div className="text-slate-400 mt-0.5">{task.learning_goal}</div> : null}
+            </div>
+            <DecisionChips decision={decision} />
           </div>
         )}
         {convo.map((m, i) => (
@@ -308,6 +461,7 @@ const CoachInAction = ({ token, method }) => {
         ))}
         {loading && <div className="text-xs text-slate-400 pl-1">Coach is responding…</div>}
         {error && <p className="text-sm text-rose-600 pl-1">{error}</p>}
+        <ChallengePanel token={token} method={method} level={level} messages={convo} />
       </div>
 
       {/* pinned reply bar */}
@@ -347,24 +501,64 @@ const StyleChip = ({ style }) => (
   </span>
 );
 
+// A level chip with a hover tooltip describing that Dreyfus stage.
+const LevelChip = ({ level }) => (
+  <span className="relative group inline-block">
+    <Chip tone={levelTone(level)}>{levelLabel(level)}</Chip>
+    {LEVEL_DESCRIPTIONS[level] && (
+      <div className="pointer-events-none absolute left-0 top-full mt-2 w-64 rounded-md bg-slate-900 text-white text-xs leading-relaxed px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-30 shadow-lg">
+        {LEVEL_DESCRIPTIONS[level]}
+      </div>
+    )}
+  </span>
+);
+
 /**
- * Compare view: run the SAME conversation across 2–4 teaching styles as
- * side-by-side columns. One shared "builder" input drives every column; each
- * column keeps its own (diverging) conversation. Stateless — each turn re-posts
- * that column's full history to /coach-turn.
+ * Compare view: run the SAME conversation across 2–4 columns side by side, with
+ * one shared "builder" input driving every column, so divergence is directly
+ * visible. Stateless — each turn re-posts that column's full history.
+ *
+ * Two axes, one at a time (a style × level grid would be up to 24 columns):
+ *  - axis 'style' — columns are teaching styles, skill level held fixed
+ *  - axis 'level' — columns are Dreyfus levels, teaching style held fixed.
+ *    This is the difficulty axis: each column's challenge is built around the
+ *    per-skill definitions for ITS target level, so "Generate challenge" in each
+ *    column shows the same lesson pitched harder or easier.
+ *
+ * Exactly one of style/level varies per axis, so any difference between columns
+ * is attributable to that axis alone.
  */
-const CompareView = ({ token }) => {
-  const [selected, setSelected] = useState(['socratic', 'example_based']);
+const CompareView = ({ token, axis, levelOptions }) => {
+  const isLevelAxis = axis === 'level';
+
+  // Column identities per axis. Level columns are keyed by string (`levelKey`)
+  // because `null` — an unassessed builder — can't be an object key.
+  const allKeys = isLevelAxis
+    ? levelOptions.map((o) => levelKey(o.level))
+    : STYLE_OPTIONS;
+
+  const [selected, setSelected] = useState(
+    isLevelAxis ? ['L1', 'L3', 'L5'] : ['socratic', 'example_based']
+  );
+  // The held-fixed value on the other axis.
+  const [fixedStyle, setFixedStyle] = useState('balanced');
+  const [fixedLevel, setFixedLevel] = useState(3);
   const [started, setStarted] = useState(false);
-  const [cols, setCols] = useState({}); // style -> { convo: [], loading, error }
+  const [cols, setCols] = useState({}); // key -> { convo, loading, error, decision }
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const inputRef = useRef(null);
 
-  const toggle = (s) => {
+  // Per-column request params — the whole point of the axis abstraction.
+  const paramsFor = (key) =>
+    isLevelAxis
+      ? { teachingMethod: fixedStyle, skillLevel: levelFromKey(key) }
+      : { teachingMethod: key, skillLevel: fixedLevel };
+
+  const toggle = (key) => {
     if (started) return;
     setSelected((prev) =>
-      prev.includes(s) ? prev.filter((x) => x !== s) : prev.length < 4 ? [...prev, s] : prev
+      prev.includes(key) ? prev.filter((x) => x !== key) : prev.length < 4 ? [...prev, key] : prev
     );
   };
 
@@ -372,23 +566,24 @@ const CompareView = ({ token }) => {
     if (selected.length < 2 || busy) return;
     setBusy(true);
     setStarted(true);
-    setCols(Object.fromEntries(selected.map((s) => [s, { convo: [], loading: true }])));
+    setCols(Object.fromEntries(selected.map((k) => [k, { convo: [], loading: true }])));
     await Promise.all(
-      selected.map(async (s) => {
+      selected.map(async (k) => {
         try {
-          const data = await coachTurn(token, { teachingMethod: s, messages: [] });
+          const data = await coachTurn(token, { ...paramsFor(k), messages: [] });
           setCols((prev) => ({
             ...prev,
-            [s]: {
+            [k]: {
               convo: [
                 { role: 'user', content: data.seededOpener || "Hi! I'm ready to get started — can you teach me this?" },
                 { role: 'assistant', content: data.reply },
               ],
+              decision: data.decision || null,
               loading: false,
             },
           }));
         } catch (e) {
-          setCols((prev) => ({ ...prev, [s]: { convo: [], loading: false, error: e.message } }));
+          setCols((prev) => ({ ...prev, [k]: { convo: [], loading: false, error: e.message } }));
         }
       })
     );
@@ -402,23 +597,28 @@ const CompareView = ({ token }) => {
     setBusy(true);
     // Build each column's next history (incl. the shared builder message) up front.
     const nextConvos = Object.fromEntries(
-      selected.map((s) => [s, [...(cols[s]?.convo || []), { role: 'user', content: text }]])
+      selected.map((k) => [k, [...(cols[k]?.convo || []), { role: 'user', content: text }]])
     );
     setCols((prev) => {
       const next = { ...prev };
-      selected.forEach((s) => { next[s] = { ...next[s], convo: nextConvos[s], loading: true }; });
+      selected.forEach((k) => { next[k] = { ...next[k], convo: nextConvos[k], loading: true }; });
       return next;
     });
     await Promise.all(
-      selected.map(async (s) => {
+      selected.map(async (k) => {
         try {
-          const data = await coachTurn(token, { teachingMethod: s, messages: nextConvos[s] });
+          const data = await coachTurn(token, { ...paramsFor(k), messages: nextConvos[k] });
           setCols((prev) => ({
             ...prev,
-            [s]: { ...prev[s], convo: [...nextConvos[s], { role: 'assistant', content: data.reply }], loading: false },
+            [k]: {
+              ...prev[k],
+              convo: [...nextConvos[k], { role: 'assistant', content: data.reply }],
+              decision: data.decision || prev[k]?.decision || null,
+              loading: false,
+            },
           }));
         } catch (e) {
-          setCols((prev) => ({ ...prev, [s]: { ...prev[s], loading: false, error: e.message } }));
+          setCols((prev) => ({ ...prev, [k]: { ...prev[k], loading: false, error: e.message } }));
         }
       })
     );
@@ -436,42 +636,95 @@ const CompareView = ({ token }) => {
     if (started && !busy && inputRef.current) inputRef.current.focus();
   }, [busy, started]);
 
+  const ColumnChip = ({ columnKey }) =>
+    isLevelAxis ? <LevelChip level={levelFromKey(columnKey)} /> : <StyleChip style={columnKey} />;
+
+  const columnLabel = (key) => (isLevelAxis ? levelLabel(levelFromKey(key)) : methodLabel(key));
+  const columnTone = (key) => (isLevelAxis ? levelTone(levelFromKey(key)) : methodTone(key));
+  const columnDescription = (key) =>
+    isLevelAxis ? LEVEL_DESCRIPTIONS[levelFromKey(key)] : STYLE_DESCRIPTIONS[key];
+
   if (!started) {
     return (
       <div className="px-6 py-6 max-w-2xl">
-        <h2 className="text-sm font-bold text-[#1E1E1E] mb-1">Compare teaching styles</h2>
+        <h2 className="text-sm font-bold text-[#1E1E1E] mb-1">
+          {isLevelAxis ? 'Compare skill levels' : 'Compare teaching styles'}
+        </h2>
         <p className="text-sm text-slate-500 mb-4">
-          Pick 2–4 styles. They&apos;ll teach the same sample task side by side, driven by one shared
-          builder input, so you can watch how each one diverges.
+          {isLevelAxis ? (
+            <>
+              Pick 2–4 skill levels to emulate builders at different proficiencies. Each column
+              teaches the same lesson to a builder at that level — then generate the challenge in
+              each to see the same lesson pitched at different difficulties.
+            </>
+          ) : (
+            <>
+              Pick 2–4 styles. They&apos;ll teach the same sample task side by side, driven by one
+              shared builder input, so you can watch how each one diverges.
+            </>
+          )}
         </p>
+
         <div className="flex flex-wrap gap-2 mb-5">
-          {STYLE_OPTIONS.map((s) => {
-            const on = selected.includes(s);
+          {allKeys.map((k) => {
+            const on = selected.includes(k);
             return (
-              <div key={s} className="relative group">
+              <div key={k} className="relative group">
                 <button
-                  onClick={() => toggle(s)}
+                  onClick={() => toggle(k)}
                   className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
-                    on ? `${TONES[methodTone(s)]} font-medium` : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                    on ? `${TONES[columnTone(k)]} font-medium` : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                   }`}
                 >
-                  {methodLabel(s)}
+                  {columnLabel(k)}
                 </button>
-                {/* hover tooltip: how this style teaches */}
-                <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-2 w-64 rounded-md bg-slate-900 text-white text-xs leading-relaxed px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-30 shadow-lg">
-                  {STYLE_DESCRIPTIONS[s]}
-                </div>
+                {columnDescription(k) && (
+                  <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-2 w-64 rounded-md bg-slate-900 text-white text-xs leading-relaxed px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-30 shadow-lg">
+                    {columnDescription(k)}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
+
+        {/* The held-fixed value on the other axis — stated explicitly so it's
+            clear what is NOT varying between columns. */}
+        <div className="mb-5 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500">
+            {isLevelAxis ? 'Teaching style (same in every column):' : 'Skill level (same in every column):'}
+          </span>
+          {isLevelAxis ? (
+            <select
+              value={fixedStyle}
+              onChange={(e) => setFixedStyle(e.target.value)}
+              className="rounded-md border border-[#D8D8E0] px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#4242EA]/30"
+            >
+              <option value="balanced">{methodLabel('balanced')}</option>
+              {STYLE_OPTIONS.map((s) => (
+                <option key={s} value={s}>{methodLabel(s)}</option>
+              ))}
+            </select>
+          ) : (
+            <select
+              value={levelKey(fixedLevel)}
+              onChange={(e) => setFixedLevel(levelFromKey(e.target.value))}
+              className="rounded-md border border-[#D8D8E0] px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#4242EA]/30"
+            >
+              {levelOptions.map((o) => (
+                <option key={levelKey(o.level)} value={levelKey(o.level)}>{o.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
         <button
           onClick={start}
           disabled={selected.length < 2}
           className="px-4 py-1.5 rounded-md text-sm font-medium text-white disabled:opacity-50"
           style={{ backgroundColor: BRAND }}
         >
-          Compare {selected.length} {selected.length === 1 ? 'style' : 'styles'}
+          Compare {selected.length} {isLevelAxis ? 'levels' : selected.length === 1 ? 'style' : 'styles'}
         </button>
         {selected.length < 2 && <span className="ml-3 text-xs text-slate-400">Pick at least 2.</span>}
       </div>
@@ -480,27 +733,38 @@ const CompareView = ({ token }) => {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="shrink-0 px-5 py-2.5 border-b border-[#E3E3E3] flex items-center gap-3 bg-white">
+      <div className="shrink-0 px-5 py-2.5 border-b border-[#E3E3E3] flex items-center gap-3 flex-wrap bg-white">
         <span className="text-sm font-semibold text-slate-700">Comparing</span>
-        {selected.map((s) => <StyleChip key={s} style={s} />)}
+        {selected.map((k) => <ColumnChip key={k} columnKey={k} />)}
+        <span className="text-xs text-slate-400">
+          · {isLevelAxis ? `all as ${methodLabel(fixedStyle)}` : `all at ${levelLabel(fixedLevel)}`}
+        </span>
         <button onClick={reset} className="ml-auto text-xs text-slate-500 hover:text-slate-800 underline">
-          Change styles
+          Change selection
         </button>
       </div>
 
       {/* columns */}
       <div className="flex-1 min-h-0 flex overflow-x-auto divide-x divide-[#E3E3E3]">
-        {selected.map((s) => {
-          const col = cols[s] || { convo: [], loading: false };
+        {selected.map((k) => {
+          const col = cols[k] || { convo: [], loading: false };
+          const { teachingMethod, skillLevel } = paramsFor(k);
           return (
-            <div key={s} className="flex flex-col min-w-[320px] flex-1 min-h-0">
-              <div className="shrink-0 px-4 py-2 border-b border-[#E3E3E3] bg-slate-50">
-                <StyleChip style={s} />
+            <div key={k} className="flex flex-col min-w-[340px] flex-1 min-h-0">
+              <div className="shrink-0 px-4 py-2 border-b border-[#E3E3E3] bg-slate-50 space-y-1.5">
+                <ColumnChip columnKey={k} />
+                <DecisionChips decision={col.decision} />
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
                 {col.convo.map((m, i) => <ChatBubble key={i} role={m.role} content={m.content} />)}
                 {col.loading && <div className="text-xs text-slate-400 pl-1">Coach is responding…</div>}
                 {col.error && <p className="text-sm text-rose-600 pl-1">{col.error}</p>}
+                <ChallengePanel
+                  token={token}
+                  method={teachingMethod}
+                  level={skillLevel}
+                  messages={col.convo}
+                />
               </div>
             </div>
           );
@@ -542,7 +806,12 @@ const TeachingLab = () => {
   const [error, setError] = useState(null);
   const [lastAnswer, setLastAnswer] = useState('');
   const [coachOpen, setCoachOpen] = useState(false);
-  const [mode, setMode] = useState('classify'); // 'classify' | 'compare'
+  // 'classify' | 'compare-style' | 'compare-level'
+  const [mode, setMode] = useState('classify');
+  const [levelOptions, setLevelOptions] = useState(DEFAULT_LEVEL_OPTIONS);
+  const [sampleTask, setSampleTask] = useState(null);
+  // The skill level the Classify tab's "Coach in Action" demo runs at.
+  const [demoLevel, setDemoLevel] = useState(3);
 
   useEffect(() => {
     let alive = true;
@@ -553,6 +822,10 @@ const TeachingLab = () => {
         setPresets(data.presets || []);
         setQuestion(data.question || '');
         if (typeof data.floor === 'number') setFloor(data.floor);
+        if (Array.isArray(data.levelOptions) && data.levelOptions.length) {
+          setLevelOptions(data.levelOptions);
+        }
+        if (data.task) setSampleTask(data.task);
       } catch (e) {
         if (alive) setError(e.message);
       }
@@ -629,13 +902,26 @@ const TeachingLab = () => {
           <div>
             <h1 className="text-base font-bold text-[#1E1E1E]">Personalized Learning</h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              {mode === 'compare'
-                ? 'Run the same task across multiple teaching styles side by side to see how the coach diverges.'
-                : `Mock-test how onboarding classifies a builder's learning-style answer — predicted style, confidence vs the ${floor} floor, and the teaching method the coach would actually use. Read-only.`}
+              {mode === 'compare-style' &&
+                'Run the same task across multiple teaching styles side by side to see how the coach diverges.'}
+              {mode === 'compare-level' &&
+                'Emulate builders at different proficiencies and generate each one’s challenge — the same lesson pitched at different difficulties.'}
+              {mode === 'classify' &&
+                `Mock-test how onboarding classifies a builder's learning-style answer — predicted style, confidence vs the ${floor} floor, and the teaching method the coach would actually use. Read-only.`}
             </p>
+            {sampleTask && mode !== 'classify' && (
+              <p className="text-xs text-slate-400 mt-1">
+                Lesson: <span className="text-slate-500">{sampleTask.title}</span>
+                {sampleTask.skill ? ` · skill: ${sampleTask.skill}` : ''}
+              </p>
+            )}
           </div>
           <div className="shrink-0 inline-flex bg-slate-100 border border-[#E3E3E3] rounded-lg p-0.5">
-            {['classify', 'compare'].map((m) => (
+            {[
+              ['classify', 'Classify'],
+              ['compare-style', 'Compare styles'],
+              ['compare-level', 'Compare skill levels'],
+            ].map(([m, label]) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
@@ -643,15 +929,22 @@ const TeachingLab = () => {
                   mode === m ? 'bg-[#4242EA] text-white font-medium' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                {m === 'classify' ? 'Classify' : 'Compare styles'}
+                {label}
               </button>
             ))}
           </div>
         </div>
 
         <div className="flex-1 min-h-0">
-          {mode === 'compare' ? (
-            <CompareView token={token} />
+          {mode !== 'classify' ? (
+            // Keyed by axis so switching resets the column selection + transcripts
+            // instead of carrying over keys that don't exist on the other axis.
+            <CompareView
+              key={mode}
+              token={token}
+              axis={mode === 'compare-level' ? 'level' : 'style'}
+              levelOptions={levelOptions}
+            />
           ) : (
             <div className="h-full overflow-y-auto">
         <SunkenSection
@@ -682,18 +975,35 @@ const TeachingLab = () => {
 
         {result && (
           <SunkenSection title="See the coach in action" hint="Run the real coach learn phase in this method — not a prediction">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setCoachOpen(true)}
-                className="px-4 py-1.5 rounded-md text-sm font-medium text-white"
-                style={{ backgroundColor: BRAND }}
-              >
-                See Coach in Action
-              </button>
-              <span className="text-sm text-slate-500">
-                Opens a live conversation where the coach teaches as{' '}
-                <Chip tone={methodTone(result.effectiveMethod)}>{methodLabel(result.effectiveMethod)}</Chip>
-              </span>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-slate-500">Emulate a builder at:</span>
+                <select
+                  value={levelKey(demoLevel)}
+                  onChange={(e) => setDemoLevel(levelFromKey(e.target.value))}
+                  className="rounded-md border border-[#D8D8E0] px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#4242EA]/30"
+                >
+                  {levelOptions.map((o) => (
+                    <option key={levelKey(o.level)} value={levelKey(o.level)}>{o.label}</option>
+                  ))}
+                </select>
+                <span className="text-xs text-slate-400">
+                  drives the challenge difficulty — use Compare skill levels to see them side by side
+                </span>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={() => setCoachOpen(true)}
+                  className="px-4 py-1.5 rounded-md text-sm font-medium text-white"
+                  style={{ backgroundColor: BRAND }}
+                >
+                  See Coach in Action
+                </button>
+                <span className="text-sm text-slate-500">
+                  Opens a live conversation where the coach teaches as{' '}
+                  <Chip tone={methodTone(result.effectiveMethod)}>{methodLabel(result.effectiveMethod)}</Chip>
+                </span>
+              </div>
             </div>
           </SunkenSection>
         )}
@@ -715,19 +1025,22 @@ const TeachingLab = () => {
           className="w-full sm:max-w-2xl p-0 flex flex-col gap-0 font-proxima"
         >
           <SheetHeader className="shrink-0 px-5 py-4 border-b border-[#E3E3E3] text-left space-y-1">
-            <SheetTitle className="flex items-center gap-2 text-base">
+            <SheetTitle className="flex items-center gap-2 flex-wrap text-base">
               Coach in action
               {result && <Chip tone={methodTone(result.effectiveMethod)}>{methodLabel(result.effectiveMethod)}</Chip>}
+              <LevelChip level={demoLevel} />
             </SheetTitle>
             <SheetDescription className="text-xs">
-              The real coach learn phase, run live in this teaching method. Reply as the builder to continue.
+              The real coach learn phase, run live in this teaching method for a builder at this
+              skill level. Reply as the builder to continue, or generate the challenge.
             </SheetDescription>
           </SheetHeader>
           {coachOpen && result && (
             <CoachInAction
-              key={`${lastAnswer}::${result.effectiveMethod}`}
+              key={`${lastAnswer}::${result.effectiveMethod}::${levelKey(demoLevel)}`}
               token={token}
               method={result.effectiveMethod}
+              level={demoLevel}
             />
           )}
         </SheetContent>

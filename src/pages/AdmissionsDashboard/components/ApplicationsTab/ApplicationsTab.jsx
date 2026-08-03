@@ -178,6 +178,8 @@ const columnLabels = {
   race: 'Race/Ethnicity',
   education: 'Education',
   referral: 'Referral Source',
+  referral_detail: 'Referral Detail',
+  referral_channel: 'Referral Channel',
   pledge: 'Pledge Signed',
   gja: 'GJA Signed',
   income: 'Pre-Program Income'
@@ -405,6 +407,16 @@ const ApplicationRow = React.memo(({
       {visibleColumns.referral && (
         <TableCell className="font-proxima text-gray-600 max-w-[150px] truncate" title={app.referral_source}>
           {app.referral_source || '-'}
+        </TableCell>
+      )}
+      {visibleColumns.referral_detail && (
+        <TableCell className="font-proxima text-gray-600 max-w-[150px] truncate" title={app.referral_detail}>
+          {app.referral_detail || '-'}
+        </TableCell>
+      )}
+      {visibleColumns.referral_channel && (
+        <TableCell className="font-proxima text-gray-600 max-w-[150px] truncate" title={app.referral_channel}>
+          {app.referral_channel || '-'}
         </TableCell>
       )}
       {visibleColumns.pledge && (
@@ -701,6 +713,8 @@ const ApplicationsTab = ({
     race_ethnicity: false,
     education: false,
     referral: false,
+    referral_detail: false,
+    referral_channel: false,
     pledge: false,
     gja: false,
     income: false
@@ -731,6 +745,8 @@ const ApplicationsTab = ({
       race_ethnicity: visibleColumns.race ?? false,
       education: visibleColumns.education ?? false,
       referral: visibleColumns.referral ?? false,
+      referral_detail: visibleColumns.referral_detail ?? false,
+      referral_channel: visibleColumns.referral_channel ?? false,
       pledge: visibleColumns.pledge ?? false,
       gja: visibleColumns.gja ?? true,
       income: visibleColumns.income ?? false
@@ -889,6 +905,8 @@ const ApplicationsTab = ({
     race_ethnicity: { label: 'Race/Ethnicity', getValue: (app) => app.demographics?.race_ethnicity || app.race_ethnicity || '' },
     education: { label: 'Education', getValue: (app) => app.demographics?.education_level || app.education_level || '' },
     referral: { label: 'Referral Source', getValue: (app) => app.demographics?.reason_for_applying || app.demographics?.referral_source || app.referral_source || '' },
+    referral_detail: { label: 'Referral Detail', getValue: (app) => app.demographics?.referral_detail || app.referral_detail || '' },
+    referral_channel: { label: 'Referral Channel', getValue: (app) => app.demographics?.referral_channel || app.referral_channel || '' },
     pledge: { label: 'Pledge Signed', getValue: (app) => app.pledge_completed ? 'Yes' : 'No' },
     gja: { label: 'GJA Signed', getValue: (app) => app.gja_signed ? 'Yes' : 'No' },
     income: { label: 'Pre-Program Income', getValue: (app) => app.personal_income || '' }
@@ -1607,6 +1625,12 @@ const ApplicationsTab = ({
                   )}
                   {visibleColumns.referral && (
                     <TableHead className="font-proxima-bold">Referral</TableHead>
+                  )}
+                  {visibleColumns.referral_detail && (
+                    <TableHead className="font-proxima-bold">Referral Detail</TableHead>
+                  )}
+                  {visibleColumns.referral_channel && (
+                    <TableHead className="font-proxima-bold">Referral Channel</TableHead>
                   )}
                   {visibleColumns.pledge && (
                     <TableHead className="font-proxima-bold">

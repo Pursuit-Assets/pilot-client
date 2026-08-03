@@ -3,6 +3,9 @@ import useAuthStore from '../../../stores/authStore';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { listCoachRuns, getCoachRun } from '../../../services/coachRunsApi';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../../../components/ui/sheet';
+import {
+  DREYFUS_LABELS, levelLabel, vsPriorLabel, gradeReason, topLevel, GRADE_ERROR_TEXT, SkillAssessmentTable,
+} from '../coachDreyfus';
 
 const BRAND = '#4242EA';
 
@@ -142,76 +145,69 @@ const CriteriaTable = ({ criteriaScores }) => {
 // that carry no per-skill assessments.
 // ---------------------------------------------------------------------------
 
-const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
+// Shared Dreyfus helpers (DREYFUS_LABELS, levelLabel, vsPriorLabel, gradeReason,
+// topLevel, GRADE_ERROR_TEXT) + SkillAssessmentTable are imported from
+// ../coachDreyfus (shared with CoachEvals). The difficulty helpers below stay
+// here — they render CoachRuns-specific JSX and aren't shared.
 
-const levelLabel = (level) =>
-  Number.isInteger(level) ? `L${level} ${DREYFUS_LABELS[level] || ''}`.trim() : 'N/A';
+/**
+ * Human-readable difficulty for the init step's learn strategy.
+ *
+ * Difficulty became Dreyfus-native on 2026-07-28 (`currentLevel` → `targetLevel`,
+ * one stage up; `difficultyLevel` is now one of 6 level slugs). Runs recorded
+ * BEFORE that date carry the retired 3-band vocabulary
+ * ('beginner'/'intermediate'/'advanced') with no levels, so this renders both —
+ * historical `agent_run_steps` rows are never rewritten.
+ */
+const LEGACY_DIFFICULTY_BANDS = ['beginner', 'intermediate', 'advanced'];
 
-/** "improved from L2" / "held L3" / "below prior L4" / "new skill" (needs a.prior from the engine). */
-const vsPriorLabel = (a) => {
-  if (!Number.isInteger(a.level)) return null;
-  if (!Number.isInteger(a.prior)) return 'new skill';
-  if (a.level > a.prior) return `↑ improved from L${a.prior}`;
-  if (a.level === a.prior) return `held L${a.prior}`;
-  return `↓ below prior L${a.prior}`;
-};
-
-/** Why the run passed/failed, from the window-relative rule. Null when the run
- *  pre-dates the engine exposing metCount/held. */
-const gradeReason = (sr) => {
-  if (Number.isInteger(sr.metCount) && Number.isInteger(sr.assessedCount)) {
-    return `held or improved on ${sr.metCount} of ${sr.assessedCount} skill${sr.assessedCount === 1 ? '' : 's'}`;
+const formatRunDifficulty = (strat) => {
+  if (Number.isInteger(strat.targetLevel)) {
+    const target = `targets ${levelLabel(strat.targetLevel)}`;
+    const from = Number.isInteger(strat.currentLevel)
+      ? ` — builder was at ${levelLabel(strat.currentLevel)}`
+      : ' — builder unassessed on these skills';
+    return (
+      <>
+        {target}
+        <span className="text-slate-500">{from}</span>
+      </>
+    );
   }
-  const withHeld = (sr.skillAssessments || []).filter((a) => typeof a.held === 'boolean');
-  if (withHeld.length) {
-    return `held or improved on ${withHeld.filter((a) => a.held).length} of ${withHeld.length} skill${withHeld.length === 1 ? '' : 's'}`;
-  }
-  return null;
-};
-
-/** Highest assessed Dreyfus level in a grade — the run's headline achievement
- *  badge ("Proficient" next to Passed). Null when no per-skill assessments. */
-const topLevel = (assessments) => {
-  const levels = (Array.isArray(assessments) ? assessments : [])
-    .map((a) => a.level).filter(Number.isInteger);
-  return levels.length ? Math.max(...levels) : null;
-};
-
-const GRADE_ERROR_TEXT = '⚠️ Grading error — a system issue prevented evaluation. Not a reflection of the builder\'s work.';
-
-/** Per-skill Dreyfus assessments incl. the grader's rationale + evidence. */
-const SkillAssessmentTable = ({ assessments }) => {
-  if (!Array.isArray(assessments) || assessments.length === 0) return null;
+  // Pre-migration run: show the band it actually used, labelled as legacy so the
+  // number isn't mistaken for a Dreyfus level.
+  const isLegacy = LEGACY_DIFFICULTY_BANDS.includes(strat.difficultyLevel);
   return (
-    <div className="border border-[#E3E3E3] rounded-md overflow-hidden">
-      <table className="w-full text-xs">
-        <thead className="bg-[#F7F7F9] text-slate-600">
-          <tr>
-            <th className="text-left px-3 py-2 font-semibold">Skill</th>
-            <th className="text-left px-3 py-2 font-semibold w-36">Level</th>
-            <th className="text-left px-3 py-2 font-semibold w-32">vs prior</th>
-            <th className="text-left px-3 py-2 font-semibold">Grader&apos;s rationale</th>
-            <th className="text-left px-3 py-2 font-semibold">Evidence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {assessments.map((a, i) => (
-            <tr key={i} className="border-t border-[#EEE] align-top">
-              <td className="px-3 py-2 text-slate-800 capitalize">{(a.skill_slug || '—').replace(/-/g, ' ')}</td>
-              <td className="px-3 py-2">
-                <Chip tone={Number.isInteger(a.level) ? (a.level >= 3 ? 'green' : a.level >= 1 ? 'blue' : 'red') : 'slate'}>
-                  {levelLabel(a.level)}
-                </Chip>
-              </td>
-              <td className="px-3 py-2 text-slate-600">{vsPriorLabel(a) || '—'}</td>
-              <td className="px-3 py-2 text-slate-600">{a.rationale || '—'}</td>
-              <td className="px-3 py-2 text-slate-500 italic">{a.evidence || '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <span className="capitalize">{strat.difficultyLevel}</span>
+      {strat.avgLevel != null && (
+        <span className="text-slate-500"> (avg skill {Math.round(strat.avgLevel)}/100)</span>
+      )}
+      {isLegacy && (
+        <span
+          className="text-slate-400 text-xs ml-1"
+          title="Recorded before difficulty moved to the Dreyfus scale on 2026-07-28. The 3 old bands collapsed Dreyfus 2↔3 and 4↔5 onto the same challenge."
+        >
+          · legacy 3-band
+        </span>
+      )}
+    </>
   );
+};
+
+/** Plain-text form of the above, for the copyable run summary. */
+const difficultySummaryText = (strat) => {
+  const modifier = strat.difficultyModifier === '+20%' ? ' · +20% for interview weak area' : '';
+  if (Number.isInteger(strat.targetLevel)) {
+    const from = Number.isInteger(strat.currentLevel)
+      ? `builder at ${levelLabel(strat.currentLevel)}`
+      : 'builder unassessed';
+    return `targets ${levelLabel(strat.targetLevel)} (${from})${modifier}`;
+  }
+  if (!strat.difficultyLevel) return '';
+  const avg = strat.avgLevel != null ? ` (avg skill ${Math.round(strat.avgLevel)})` : '';
+  const legacy = LEGACY_DIFFICULTY_BANDS.includes(strat.difficultyLevel) ? ' · legacy 3-band' : '';
+  return `${strat.difficultyLevel}${avg}${legacy}${modifier}`;
 };
 
 // ===========================================================================
@@ -454,13 +450,12 @@ const PersonalizationCard = ({ strat }) => {
         {strat.teachingMethod && (
           <li className="flex gap-2"><span>📘</span><span><span className="font-semibold">Teaching style:</span> {methodLabel}</span></li>
         )}
-        {strat.difficultyLevel && (
+        {(strat.difficultyLevel || Number.isInteger(strat.targetLevel)) && (
           <li className="flex gap-2">
             <span>🎚️</span>
             <span>
               <span className="font-semibold">Difficulty:</span>{' '}
-              <span className="capitalize">{strat.difficultyLevel}</span>
-              {strat.avgLevel != null && <span className="text-slate-500"> (avg skill {Math.round(strat.avgLevel)}/100)</span>}
+              {formatRunDifficulty(strat)}
             </span>
           </li>
         )}
@@ -846,9 +841,8 @@ const buildRunSummaryModel = (run) => {
       rationale: a.rationale || '',
     })),
     teachingStyle: strat.teachingMethod ? (TEACHING_METHOD_LABEL[strat.teachingMethod] || strat.teachingMethod) : '',
-    difficulty: strat.difficultyLevel
-      ? `${strat.difficultyLevel}${strat.avgLevel != null ? ` (avg skill ${Math.round(strat.avgLevel)})` : ''}${strat.difficultyModifier === '+20%' ? ' · +20% for interview weak area' : ''}`
-      : '',
+    // Plain-text twin of formatRunDifficulty — same both-vocabularies rule.
+    difficulty: difficultySummaryText(strat),
     attempts: gradeSteps.length || 0,
   };
 };
