@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { TrendingUp, TrendingDown, ChevronDown, ChevronRight } from 'lucide-react';
-
-// Dreyfus 0-5 labels (N/A is the administrative "not assessed" state).
-const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
+// Dreyfus 0-5 stage names — shared so this panel can't drift from the Coach tabs
+// (N/A is the administrative "not assessed" state).
+import { DREYFUS_LABELS } from '../../coachDreyfus';
 // Sequential grey → indigo ramp so proficiency progression reads at a glance.
 const LEVEL_RAMP = ['#b9bcc9', '#a3a6e0', '#8186ee', '#5b5fe8', '#3f3fd0', '#2a2a9e'];
 const EMPTY_PIP = '#ECECF3';
@@ -58,7 +58,7 @@ const SkillRow = ({ skill }) => {
   const tip =
     level === null
       ? 'Not assessed yet'
-      : `${level} · ${label}` +
+      : label +
         (confidence != null ? ` · conf ${confidence.toFixed(2)}` : '') +
         ` · ${observations} obs` +
         (seeded ? ' (seeded prior — not yet confirmed by a graded task)' : '');
@@ -71,7 +71,7 @@ const SkillRow = ({ skill }) => {
       <span
         className={`w-32 shrink-0 text-right text-xs tabular-nums ${level === null ? 'text-[#BBB] italic' : 'font-proxima-bold text-[#1E1E1E]'}`}
       >
-        {level === null ? 'N/A' : `${level} ${label}`}
+        {level === null ? 'N/A' : label}
         {seeded && level !== null ? <span className="ml-1 text-[10px] font-normal text-[#999]">·seed</span> : null}
       </span>
     </li>
@@ -290,7 +290,7 @@ const Leaderboard = ({ icon, title, items, empty, variant = 'strength' }) => (
     ) : (
       <ul className="mt-3 space-y-2.5">
         {items.map((item) => (
-          <li key={item.slug} className="flex items-center gap-3" title={`${item.level} · ${item.label}`}>
+          <li key={item.slug} className="flex items-center gap-3" title={item.label}>
             <span className="flex-1 min-w-0 truncate text-sm text-[#1E1E1E]">{item.name}</span>
             <SegmentMeter level={item.level} dim={item.dim} />
             <span className="w-28 shrink-0 text-right text-xs font-proxima-bold tabular-nums text-[#1E1E1E]">
