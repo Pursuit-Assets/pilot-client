@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Star, Save } from 'lucide-react';
+import { usePermissions } from '../../../hooks/usePermissions';
 
 const StarRating = ({ value, onChange, disabled }) => {
   const [hover, setHover] = useState(0);
@@ -37,6 +38,10 @@ const DemoRatingModal = ({ open, onClose, builder, rating, onSave, existingFeedb
   const [overallNotes, setOverallNotes] = useState('');
   const [selectionStatus, setSelectionStatus] = useState('pending');
   const [saving, setSaving] = useState(false);
+  // Read-only accounts (interview candidates) can READ an existing review — that's real
+  // signal for their exercise — but every input is inert and Save is not offered, since
+  // the server refuses the POST.
+  const { isReadOnly } = usePermissions();
 
   // Populate from existing feedback or rating prop
   useEffect(() => {
@@ -115,7 +120,7 @@ const DemoRatingModal = ({ open, onClose, builder, rating, onSave, existingFeedb
           {/* Star Rating */}
           <div>
             <label className="text-xs text-slate-500 font-medium mb-1.5 block">Demo Rating</label>
-            <StarRating value={score} onChange={setScore} disabled={!hasVideo} />
+            <StarRating value={score} onChange={setScore} disabled={!hasVideo || isReadOnly} />
             {!hasVideo && <p className="text-[10px] text-slate-400 mt-1">No demo video submitted</p>}
           </div>
 
@@ -131,12 +136,13 @@ const DemoRatingModal = ({ open, onClose, builder, rating, onSave, existingFeedb
               ].map(s => (
                 <button
                   key={s.key}
+                  disabled={isReadOnly}
                   onClick={() => setSelectionStatus(s.key)}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
                     selectionStatus === s.key
                       ? 'border-[#4242EA] bg-[#4242EA]/10 text-[#4242EA]'
                       : 'border-[#E3E3E3] text-slate-500 hover:border-slate-300'
-                  }`}
+                  } ${isReadOnly ? 'cursor-default opacity-70' : ''}`}
                 >
                   {s.emoji} {s.label}
                 </button>
@@ -156,9 +162,10 @@ const DemoRatingModal = ({ open, onClose, builder, rating, onSave, existingFeedb
               <textarea
                 value={field.value}
                 onChange={e => field.setter(e.target.value)}
-                placeholder={field.placeholder}
+                placeholder={isReadOnly ? '—' : field.placeholder}
+                readOnly={isReadOnly}
                 rows={2}
-                className="w-full px-3 py-2 text-sm border border-[#E3E3E3] rounded-md bg-white text-[#1E1E1E] focus:border-[#4242EA] focus:outline-none resize-none"
+                className={`w-full px-3 py-2 text-sm border border-[#E3E3E3] rounded-md text-[#1E1E1E] focus:border-[#4242EA] focus:outline-none resize-none ${isReadOnly ? 'bg-[#FAFAFA]' : 'bg-white'}`}
               />
             </div>
           ))}
@@ -170,16 +177,18 @@ const DemoRatingModal = ({ open, onClose, builder, rating, onSave, existingFeedb
             onClick={onClose}
             className="px-4 py-1.5 text-xs font-medium text-slate-500 border border-[#E3E3E3] rounded-md hover:bg-[#EFEFEF]"
           >
-            Cancel
+            {isReadOnly ? 'Close' : 'Cancel'}
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-1.5 text-xs font-medium text-white bg-[#4242EA] rounded-md hover:bg-[#3535c8] disabled:opacity-50 flex items-center gap-1.5"
-          >
-            <Save size={13} />
-            {saving ? 'Saving...' : 'Save Review'}
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-[#4242EA] rounded-md hover:bg-[#3535c8] disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <Save size={13} />
+              {saving ? 'Saving...' : 'Save Review'}
+            </button>
+          )}
         </div>
       </div>
     </div>

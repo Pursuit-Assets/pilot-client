@@ -107,6 +107,29 @@ function CoachRunsRedirect() {
   return <Navigate to={dest} replace />;
 }
 
+// Where an authenticated user lands on "/". Interview candidates have no enrollment,
+// so the builder Dashboard is empty for them — the Cohort Hub is the whole reason they
+// have an account.
+function HomeRedirect() {
+  const role = useAuthStore((s) => s.user?.role);
+  return <Navigate to={role === 'candidate' ? '/admin-dashboard' : '/dashboard'} replace />;
+}
+
+/**
+ * Keeps interview candidates inside the Cohort Hub.
+ *
+ * A candidate holds `page:admin_attendance` and `page:assessment_grades` only because
+ * the Cohort Hub's data endpoints are gated on them — those OTHER pages are not part of
+ * the exercise. PermissionRoute would happily let them through, so wrap those routes in
+ * this instead of widening the permission model. (Writes are separately refused by the
+ * server for this role; this is about which pages they see.)
+ */
+function CohortHubOnly({ children }) {
+  const role = useAuthStore((s) => s.user?.role);
+  if (role === 'candidate') return <Navigate to="/admin-dashboard" replace />;
+  return children;
+}
+
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const isLoading = useAuthStore((s) => s.isLoading);
@@ -198,7 +221,9 @@ function App() {
         {/* Builder routes (with layout) */}
         <Route path="/dashboard" element={
           <ProtectedRoute>
-            <Dashboard />
+            <CohortHubOnly>
+              <Dashboard />
+            </CohortHubOnly>
           </ProtectedRoute>
         } />
         <Route path="/ai-chat" element={
@@ -263,6 +288,8 @@ function App() {
             </PermissionRoute>
           </Layout>
         } />
+        {/* Program Analytics is deliberately open to interview candidates — the exercise
+            asks them to read cohort-level trends, not just one cohort. */}
         <Route path="/program-analytics" element={
           <Layout>
             <PermissionRoute permission={PAGE_PERMISSIONS.ADMIN_DASHBOARD}>
@@ -273,21 +300,27 @@ function App() {
         <Route path="/attendance-viz-lab" element={
           <Layout>
             <PermissionRoute permission={PAGE_PERMISSIONS.ADMIN_DASHBOARD}>
-              <AttendanceVizLab />
+              <CohortHubOnly>
+                <AttendanceVizLab />
+              </CohortHubOnly>
             </PermissionRoute>
           </Layout>
         } />
         <Route path="/admin/assessment-grades" element={
           <Layout>
             <PermissionRoute permission={PAGE_PERMISSIONS.ASSESSMENT_GRADES}>
-              <AssessmentGrades />
+              <CohortHubOnly>
+                <AssessmentGrades />
+              </CohortHubOnly>
             </PermissionRoute>
           </Layout>
         } />
         <Route path="/admin-attendance-dashboard" element={
           <Layout>
             <PermissionRoute permission={PAGE_PERMISSIONS.ADMIN_ATTENDANCE}>
-              <AdminAttendanceDashboard />
+              <CohortHubOnly>
+                <AdminAttendanceDashboard />
+              </CohortHubOnly>
             </PermissionRoute>
           </Layout>
         } />
@@ -627,7 +660,7 @@ function App() {
           </ProtectedRoute>
         } />
 
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<HomeRedirect />} />
       </Routes>
       
       {/* Global Auth Error Modal */}

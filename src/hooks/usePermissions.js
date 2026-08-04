@@ -1,8 +1,9 @@
 import { useCallback, useMemo } from 'react';
 import useAuthStore from '../stores/authStore';
-import { 
-  DEFAULT_ROLE_PERMISSIONS, 
+import {
+  DEFAULT_ROLE_PERMISSIONS,
   PAGE_PERMISSIONS,
+  READ_ONLY_ROLES,
 } from '../constants/permissions';
 
 /**
@@ -141,7 +142,22 @@ export function usePermissions() {
     if (!user?.role) return false;
     return user.role === 'admin' || user.role === 'staff';
   }, [user]);
-  
+
+  /**
+   * Whether this account can only READ.
+   *
+   * The server refuses every state-changing request from these roles
+   * (test-pilot-server middleware/readOnlyRole.js) because the pages they can see gate
+   * reads and writes on the same permission key — permissions alone can't express
+   * "look, don't touch". Components use this to HIDE write controls: a blocked write
+   * returns 403, and the global fetch interceptor is one branch away from treating a
+   * 403 as an expired session, so a read-only user must never be offered the button.
+   *
+   * This is presentation only. The server is the enforcement.
+   */
+  const isReadOnly = useMemo(() => READ_ONLY_ROLES.includes(user?.role), [user]);
+
+
   return {
     // Core permission checks
     hasPermission,
@@ -155,6 +171,7 @@ export function usePermissions() {
     userRole: user?.role,
     isAdmin,
     isStaffOrAdmin,
+    isReadOnly,
     hasDbPermissions,
     
     // Export constants for convenience

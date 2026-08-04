@@ -4,6 +4,7 @@ import { Badge } from '../../../components/ui/badge';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { ChevronRight, Plus } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 import { cachedAdminApi } from '../../../services/cachedAdminApi';
 import TaskDetailPanel from './TaskDetailPanel';
 import { GradeBar, letterGrade, ENROLLMENT_BADGE, ENROLLMENT_LABELS } from '../utils/sharedComponents';
@@ -25,6 +26,9 @@ const MiniTooltip = ({ active, payload, label }) => {
 
 const MetricDetailDrawer = ({ metric, cohortRow, nps, mode, cohortName, selectedCohortId, onClose }) => {
   const token = useAuthStore((s) => s.token);
+  // Read-only accounts (interview candidates) can drill into a metric but not edit the
+  // records behind it — the server refuses those writes.
+  const { isReadOnly } = usePermissions();
   const [detailData, setDetailData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [expandedTaskId, setExpandedTaskId] = useState(null);
@@ -318,13 +322,15 @@ const MetricDetailDrawer = ({ metric, cohortRow, nps, mode, cohortName, selected
                         b.attendance_percentage >= 80 ? 'text-green-600' :
                         b.attendance_percentage >= 60 ? 'text-yellow-600' : 'text-red-500'
                       }`}>{b.attendance_percentage}%</span>
-                      <button
-                        onClick={() => setAddingAttendanceFor(addingAttendanceFor === b.user_id ? null : b.user_id)}
-                        className="p-0.5 rounded text-slate-400 hover:text-[#4242EA] hover:bg-[#EFEFEF]"
-                        title="Add attendance record"
-                      >
-                        <Plus size={12} />
-                      </button>
+                      {!isReadOnly && (
+                        <button
+                          onClick={() => setAddingAttendanceFor(addingAttendanceFor === b.user_id ? null : b.user_id)}
+                          className="p-0.5 rounded text-slate-400 hover:text-[#4242EA] hover:bg-[#EFEFEF]"
+                          title="Add attendance record"
+                        >
+                          <Plus size={12} />
+                        </button>
+                      )}
                     </div>
                     {addingAttendanceFor === b.user_id && (
                       <div className="w-full mt-1.5 pt-1.5 border-t border-[#EFEFEF] space-y-1.5">
@@ -500,16 +506,22 @@ const MetricDetailDrawer = ({ metric, cohortRow, nps, mode, cohortName, selected
                         <span className="text-[10px] text-slate-400">...</span>
                       ) : (
                         <div className="flex items-center gap-1.5">
-                          <select
-                            value={b.enrollment_status || 'in_progress'}
-                            onChange={(e) => handleEnrollmentSave(b, e.target.value)}
-                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full cursor-pointer focus:outline-none appearance-none ${ENROLLMENT_BADGE[b.enrollment_status || 'in_progress']}`}
-                          >
-                            <option value="in_progress">In Progress</option>
-                            <option value="completed">Completed</option>
-                            <option value="withdrawn">Withdrawn</option>
-                            <option value="deferred">Deferred</option>
-                          </select>
+                          {isReadOnly ? (
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ENROLLMENT_BADGE[b.enrollment_status || 'in_progress']}`}>
+                              {ENROLLMENT_LABELS[b.enrollment_status || 'in_progress']}
+                            </span>
+                          ) : (
+                            <select
+                              value={b.enrollment_status || 'in_progress'}
+                              onChange={(e) => handleEnrollmentSave(b, e.target.value)}
+                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full cursor-pointer focus:outline-none appearance-none ${ENROLLMENT_BADGE[b.enrollment_status || 'in_progress']}`}
+                            >
+                              <option value="in_progress">In Progress</option>
+                              <option value="completed">Completed</option>
+                              <option value="withdrawn">Withdrawn</option>
+                              <option value="deferred">Deferred</option>
+                            </select>
+                          )}
                           {b.enrollment_status === 'withdrawn' && (
                             <div className="flex items-center gap-1">
                               <span className="text-[9px] text-red-400">On:</span>
@@ -517,7 +529,8 @@ const MetricDetailDrawer = ({ metric, cohortRow, nps, mode, cohortName, selected
                                 type="date"
                                 value={b.withdrawal_date ? b.withdrawal_date.split('T')[0] : ''}
                                 onChange={(e) => handleWithdrawalDateSave(b, e.target.value)}
-                                className="text-[9px] text-red-500 bg-white border border-red-200 rounded px-1 py-0.5 focus:outline-none focus:border-red-400 w-28 cursor-pointer"
+                                readOnly={isReadOnly}
+                                className={`text-[9px] text-red-500 bg-white border border-red-200 rounded px-1 py-0.5 focus:outline-none focus:border-red-400 w-28 ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}
                               />
                             </div>
                           )}

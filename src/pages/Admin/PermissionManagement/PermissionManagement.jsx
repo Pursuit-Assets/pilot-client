@@ -39,6 +39,7 @@ import {
 } from '../../../components/ui/dialog';
 import { Textarea } from '../../../components/ui/textarea';
 import { toast } from 'sonner';
+import CandidateInvites from './components/CandidateInvites';
 
 // Format role name for display (e.g. "workshop_admin" -> "Workshop Admin")
 const formatRoleName = (role) => {
@@ -46,7 +47,7 @@ const formatRoleName = (role) => {
 };
 
 // Fallback role list (used until DB roles are loaded)
-const FALLBACK_ROLES = ['admin', 'staff', 'builder', 'volunteer', 'workshop_participant', 'workshop_admin', 'enterprise_builder', 'enterprise_admin', 'applicant'];
+const FALLBACK_ROLES = ['admin', 'staff', 'builder', 'volunteer', 'workshop_participant', 'workshop_admin', 'enterprise_builder', 'enterprise_admin', 'candidate', 'applicant'];
 
 // Admin page permissions that can be toggled for staff users
 const ADMIN_PAGE_PERMISSIONS = [
@@ -1165,6 +1166,9 @@ function PermissionManagement() {
         </div>
 
         <div className="max-w-7xl mx-auto px-8 py-6">
+          {/* Candidate invites — read-only Cohort Hub access for interview candidates */}
+          <CandidateInvites />
+
           {/* Search bar */}
           <div className="bg-white rounded-lg border border-slate-200 mb-4">
             <div className="p-4 flex items-center gap-4">

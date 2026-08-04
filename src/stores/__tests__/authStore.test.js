@@ -634,8 +634,9 @@ describe('authStore', () => {
   // ---------------------------------------------------------------------------
   // All role types via unified login
   // The backend returns userType='builder' for admin, staff, builder,
-  // workshop_admin, enterprise_builder, enterprise_admin, candidate roles.
+  // workshop_admin, enterprise_builder, enterprise_admin roles.
   // userType='volunteer' for volunteers.
+  // userType='candidate' for interview candidates (read-only Cohort Hub access).
   // userType='applicant' for applicants.
   // ---------------------------------------------------------------------------
   describe('login across all RBAC roles', () => {
@@ -647,7 +648,7 @@ describe('authStore', () => {
       { role: 'workshop_admin', userType: 'builder', shouldAuth: true },
       { role: 'enterprise_builder', userType: 'builder', shouldAuth: true },
       { role: 'enterprise_admin', userType: 'builder', shouldAuth: true },
-      { role: 'candidate', userType: 'builder', shouldAuth: true },
+      { role: 'candidate', userType: 'candidate', shouldAuth: true },
       { role: 'volunteer', userType: 'volunteer', shouldAuth: true },
       { role: 'applicant', userType: 'applicant', shouldAuth: false, isWorkshopParticipant: false },
     ];

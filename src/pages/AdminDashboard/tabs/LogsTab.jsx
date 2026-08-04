@@ -8,6 +8,7 @@ import {
 import BuilderLogModal from '../components/BuilderLogModal';
 import BuilderDrawer from '../components/BuilderDrawer';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -176,6 +177,9 @@ const CohortLogRow = ({ log, itemKey, expandedItemId, setExpandedItemId, borderH
 
 const LogsTab = ({ selectedCohortId, cohorts }) => {
   const token = useAuthStore((s) => s.token);
+  // Read-only accounts (interview candidates) can see the logs but not write to them —
+  // the server refuses the write, so don't offer the control.
+  const { isReadOnly } = usePermissions();
   const [supportTickets, setSupportTickets] = useState([]);
   const [nextStepLogs, setNextStepLogs] = useState([]);
   const [allLogs, setAllLogs] = useState([]);
@@ -357,13 +361,15 @@ const LogsTab = ({ selectedCohortId, cohorts }) => {
           <Badge className="bg-[#EFEFEF] text-slate-600 text-xs">{totalLogs}</Badge>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowLogModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#4242EA] text-white hover:bg-[#3535c8] transition-colors"
-          >
-            <Plus size={12} />
-            Add Log
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={() => setShowLogModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#4242EA] text-white hover:bg-[#3535c8] transition-colors"
+            >
+              <Plus size={12} />
+              Add Log
+            </button>
+          )}
           <div className="flex gap-1">
             {['active', 'all'].map(f => (
               <button key={f} onClick={() => setSupportFilter(f)}
@@ -450,11 +456,15 @@ const LogsTab = ({ selectedCohortId, cohorts }) => {
                                 : 'bg-blue-100 text-blue-700'
                               }`}>{log.log_type}</Badge>
                               <span className="text-[10px] text-slate-500 flex-1 min-w-0 truncate">{log.next_steps}</span>
+                              {/* Disabled rather than hidden for read-only accounts: the
+                                  current status is information they need, they just can't
+                                  change it. */}
                               <select
                                 value={log.status}
+                                disabled={isReadOnly}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => { e.stopPropagation(); handleNextStepStatusChange(log.log_id, e.target.value); }}
-                                className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold cursor-pointer focus:outline-none flex-shrink-0 ${nextStepStatusColors[log.status] || 'text-slate-500 bg-slate-50'}`}
+                                className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold focus:outline-none flex-shrink-0 ${isReadOnly ? 'appearance-none cursor-default' : 'cursor-pointer'} ${nextStepStatusColors[log.status] || 'text-slate-500 bg-slate-50'}`}
                               >
                                 {['open', 'in_progress', 'closed'].map(s => (
                                   <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
@@ -523,9 +533,10 @@ const LogsTab = ({ selectedCohortId, cohorts }) => {
                               <span className="text-[10px] text-slate-500 flex-1 min-w-0 truncate">{ticket.log_notes}</span>
                               <select
                                 value={ticket.current_status}
+                                disabled={isReadOnly}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => { e.stopPropagation(); handleTicketStatusChange(ticket.support_id, e.target.value); }}
-                                className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold cursor-pointer focus:outline-none flex-shrink-0 ${statusColors[ticket.current_status] || 'text-slate-500 bg-slate-50'}`}
+                                className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold focus:outline-none flex-shrink-0 ${isReadOnly ? 'appearance-none cursor-default' : 'cursor-pointer'} ${statusColors[ticket.current_status] || 'text-slate-500 bg-slate-50'}`}
                               >
                                 {['open', 'in_progress', 'follow_up', 'accepted', 'denied', 'closed'].map(s => (
                                   <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
@@ -547,26 +558,28 @@ const LogsTab = ({ selectedCohortId, cohorts }) => {
                                   <span>·</span>
                                   <span>by {ticket.created_by_name}</span>
                                 </div>
-                                <div className="flex gap-1.5">
-                                  <input
-                                    type="text"
-                                    value={ticketNoteInputs[ticket.support_id] || ''}
-                                    onChange={(e) => setTicketNoteInputs(prev => ({ ...prev, [ticket.support_id]: e.target.value }))}
-                                    placeholder="Add a note or update..."
-                                    className="flex-1 px-2 py-1 text-xs border border-[#E3E3E3] rounded bg-white focus:border-[#4242EA] focus:outline-none"
-                                    onClick={(e) => e.stopPropagation()}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleTicketAddNote(ticket.support_id)}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); handleTicketAddNote(ticket.support_id); }}
-                                    disabled={ticketNoteSaving[ticket.support_id] || !ticketNoteInputs[ticket.support_id]?.trim()}
-                                    className="px-2 py-1 text-xs bg-[#4242EA] text-white rounded hover:bg-[#3535c8] disabled:opacity-50 flex items-center gap-1"
-                                  >
-                                    <MessageSquarePlus size={11} />
-                                    {ticketNoteSaving[ticket.support_id] ? '...' : 'Add'}
-                                  </button>
-                                </div>
+                                {!isReadOnly && (
+                                  <div className="flex gap-1.5">
+                                    <input
+                                      type="text"
+                                      value={ticketNoteInputs[ticket.support_id] || ''}
+                                      onChange={(e) => setTicketNoteInputs(prev => ({ ...prev, [ticket.support_id]: e.target.value }))}
+                                      placeholder="Add a note or update..."
+                                      className="flex-1 px-2 py-1 text-xs border border-[#E3E3E3] rounded bg-white focus:border-[#4242EA] focus:outline-none"
+                                      onClick={(e) => e.stopPropagation()}
+                                      onKeyDown={(e) => e.key === 'Enter' && handleTicketAddNote(ticket.support_id)}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); handleTicketAddNote(ticket.support_id); }}
+                                      disabled={ticketNoteSaving[ticket.support_id] || !ticketNoteInputs[ticket.support_id]?.trim()}
+                                      className="px-2 py-1 text-xs bg-[#4242EA] text-white rounded hover:bg-[#3535c8] disabled:opacity-50 flex items-center gap-1"
+                                    >
+                                      <MessageSquarePlus size={11} />
+                                      {ticketNoteSaving[ticket.support_id] ? '...' : 'Add'}
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>

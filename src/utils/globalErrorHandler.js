@@ -1,6 +1,8 @@
 // Global error handler that overrides fetch to handle auth errors automatically
 // This ensures all API calls get proper auth error handling without component changes
 
+import { toast } from 'sonner';
+
 let hasTriggeredAuthModal = false; // One-time flag to prevent any further modals
 
 // Store original fetch
@@ -49,6 +51,17 @@ const enhancedFetch = async (...args) => {
         // Skip global handling for permission denied on specific page access (not an auth issue)
         if (response.status === 403 && errorData.error === 'Access denied') {
           console.log('🔒 Permission denied, letting component handle it...');
+          return response;
+        }
+
+        // Skip global handling for read-only accounts (interview candidates). The server
+        // refuses every state-changing request from those roles
+        // (test-pilot-server middleware/readOnlyRole.js) — that's a standing property of
+        // the account, NOT an expired session, so it must never trigger the auth modal or
+        // the logout redirect. Explain it once per attempt and hand the response back.
+        if (response.status === 403 && errorData.readOnly) {
+          console.log('👀 Read-only account attempted a write, letting component handle it...');
+          toast.info('This account has read-only access — changes are disabled.');
           return response;
         }
 
