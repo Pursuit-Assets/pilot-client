@@ -44,7 +44,9 @@ const AdmissionsDashboard = () => {
   const [returningLoading, setReturningLoading] = useState(true);
   const [returningError, setReturningError] = useState(null);
   const fetchReturningApplicants = React.useCallback(async () => {
-    if (!token) return;
+    // Clear the spinner on the bail-out too: returningLoading starts true, so an
+    // early return without this leaves the tab body spinning forever.
+    if (!token) { setReturningLoading(false); return; }
     try {
       setReturningError(null);
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/admissions/dashboard/returning-applicants`, {
