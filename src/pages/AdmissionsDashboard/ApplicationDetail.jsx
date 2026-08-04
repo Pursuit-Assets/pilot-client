@@ -228,6 +228,7 @@ const ApplicationDetail = () => {
     const [cohortOptions, setCohortOptions] = useState([]);
     const [selectedCohortId, setSelectedCohortId] = useState('');
     const [cohortUpdating, setCohortUpdating] = useState(false);
+    const [cohortHistory, setCohortHistory] = useState([]);
 
     // Notes modal management
     const [notesModalOpen, setNotesModalOpen] = useState(false);
@@ -330,15 +331,48 @@ const ApplicationDetail = () => {
         }
     };
 
+    // Every recorded move of this application between cohorts. Empty for anyone who has never
+    // been moved, and for moves that happened before the audit existed (2026-08-04).
+    const fetchCohortHistory = async () => {
+        try {
+            const response = await fetch(
+                `${import.meta.env.VITE_API_URL}/api/admissions/applicants/${applicantId}/cohort-history`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            if (!response.ok) return;
+            const data = await response.json();
+            setCohortHistory(data?.history || []);
+        } catch (error) {
+            console.error('Error fetching cohort change history:', error);
+        }
+    };
+
     useEffect(() => {
         if (applicantId && token) {
             fetchApplicationDetail();
             fetchCohortOptions();
+            fetchCohortHistory();
         }
     }, [applicantId, token]);
 
     const handleUpdateApplicantCohort = async () => {
         if (!applicationData?.applicant?.applicant_id || !selectedCohortId) return;
+
+        // Every staff cohort move is recorded with who did it and why. The server REQUIRES a
+        // reason once an admission decision is final (moving a decided applicant re-counts that
+        // decision in the destination cohort) and returns a 400 naming the status if one is
+        // missing — that rule is not duplicated here, so this prompt stays optional and the
+        // server's own message surfaces through the catch below.
+        const { value: reason, isConfirmed } = await Swal.fire({
+            title: 'Move to a different cohort?',
+            input: 'text',
+            inputLabel: 'Reason for the move (recorded in the audit trail)',
+            inputPlaceholder: 'e.g. applied to the wrong cycle by mistake',
+            showCancelButton: true,
+            confirmButtonText: 'Move cohort'
+        });
+        if (!isConfirmed) return;
+
         setCohortUpdating(true);
         try {
             const response = await fetch(
@@ -351,7 +385,8 @@ const ApplicationDetail = () => {
                     },
                     body: JSON.stringify({
                         cohort_id: selectedCohortId,
-                        application_id: applicationData?.application?.application_id || null
+                        application_id: applicationData?.application?.application_id || null,
+                        notes: (reason || '').trim() || null
                     })
                 }
             );
@@ -362,6 +397,7 @@ const ApplicationDetail = () => {
             }
 
             await fetchApplicationDetail();
+            await fetchCohortHistory();
             Swal.fire({
                 icon: 'success',
                 title: 'Cohort Updated',
@@ -910,12 +946,46 @@ const ApplicationDetail = () => {
                                                 <Button
                                                     variant="outline"
                                                     onClick={handleUpdateApplicantCohort}
-                                                    disabled={!selectedCohortId || cohortUpdating}
+                                                    disabled={!selectedCohortId || cohortUpdating || application?.enrollment_status === 'deferred'}
                                                     className="font-proxima"
                                                 >
                                                     {cohortUpdating ? 'Updating...' : 'Update Cohort'}
                                                 </Button>
                                             </div>
+
+                                            {/* A deferred applicant is in no cohort on purpose, and the
+                                                applicant picks their cohort when they reinstate. The server
+                                                refuses this move too — disabling the button just says so
+                                                before the click instead of after. */}
+                                            {application?.enrollment_status === 'deferred' && (
+                                                <p className="mt-3 text-xs text-gray-600 font-proxima">
+                                                    Deferred applicants are held in the deferred pool with no cohort.
+                                                    Reinstate them instead — they choose a cohort when they return.
+                                                </p>
+                                            )}
+
+                                            {cohortHistory.length > 0 && (
+                                                <div className="mt-4 border-t border-blue-200 pt-3">
+                                                    <p className="text-xs text-gray-500 font-proxima mb-2">Cohort Change History</p>
+                                                    <div className="flex flex-col gap-2 max-h-40 overflow-y-auto">
+                                                        {cohortHistory.map((change) => (
+                                                            <div key={change.change_id} className="text-xs font-proxima text-gray-700">
+                                                                <span className="font-semibold">
+                                                                    {change.from_cohort || 'No cohort'} → {change.to_cohort || 'No cohort'}
+                                                                </span>
+                                                                <span className="text-gray-500">
+                                                                    {' · '}{change.change_reason.replace(/_/g, ' ')}
+                                                                    {' · '}{new Date(change.changed_at).toLocaleDateString()}
+                                                                    {' · '}{change.changed_by_staff || (change.changed_by_applicant ? 'the applicant' : 'unattributed')}
+                                                                </span>
+                                                                {change.notes && (
+                                                                    <div className="text-gray-600 italic">{change.notes}</div>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </CardContent>
                                     </Card>
                                 )}
