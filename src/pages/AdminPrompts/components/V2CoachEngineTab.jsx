@@ -367,6 +367,80 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
   // sections — never the read-only "computed at runtime" debug sections, even
   // if an older backend still includes them in the payload.
   const onboardingSections = (onboardingAgent?.sections || []).filter((s) => s.editable !== false);
+  // Two flows exist since the 2026-08 redesign: sections are tagged flow:'v2'
+  // | 'legacy' (untagged = legacy, for older backends). v2 sections with a
+  // null id mean migration 20260804 hasn't been applied — hide them rather
+  // than rendering empty cards.
+  const onboardingV2Sections = onboardingSections.filter((s) => s.flow === 'v2' && s.id != null);
+  const onboardingLegacySections = onboardingSections.filter((s) => s.flow !== 'v2');
+  const onboardingRedesign = onboardingAgent?.redesign || null;
+
+  // Flip the onboarding-flow knob (coach_v2_config.onboarding_redesign_enabled).
+  // It lives in coach_v2_config for the validation/reload plumbing, but its
+  // home in the UI is the Onboarding tab — it's an onboarding control, not a
+  // coach-loop orchestrator scalar.
+  const handleToggleRedesign = async (nextEnabled) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/admin/prompts/coach-v2-config/onboarding_redesign_enabled`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ value: nextEnabled ? 1 : 0 }),
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `PUT failed: ${res.status}`);
+      }
+      showNotification(`Onboarding flow switched to ${nextEnabled ? 'Redesigned' : 'Legacy'}`);
+      await fetchData();
+    } catch (error) {
+      console.error('Error toggling onboarding redesign:', error);
+      showNotification(`Failed to switch onboarding flow: ${error.message}`, 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Shared renderer for one flow's section group (nested sub-tabs of
+  // TemplateCards — same surface both flows use).
+  const renderOnboardingSectionGroup = (sections) => (
+    <Tabs defaultValue={sections[0]?.key} className="w-full">
+      <TabsList className="bg-white border border-[#C8C8C8] p-1 h-auto flex-wrap justify-start">
+        {sections.map((section) => (
+          <TabsTrigger
+            key={section.key}
+            value={section.key}
+            className="font-proxima data-[state=active]:bg-[#4242EA] data-[state=active]:text-white"
+          >
+            {section.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      <div className="mt-4">
+        {sections.map((section) => (
+          <TabsContent key={section.key} value={section.key} className="m-0">
+            <TemplateCard
+              phase={section.key}
+              icon={MessageSquare}
+              template={{
+                name: section.label,
+                description: section.description,
+                content: section.content,
+                id: section.id,
+              }}
+              canEdit={canEdit}
+              onEdit={() => openEditor(section.id, section.content, 'content-generation', section.label)}
+              onHistory={() => openHistory('content_generation_prompt', String(section.id), section.label)}
+            />
+          </TabsContent>
+        ))}
+      </div>
+    </Tabs>
+  );
 
   return (
     <div className="space-y-6">
@@ -452,49 +526,76 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
         {/* ========== Sub-tab 2: Onboarding ========== */}
         <TabsContent value="onboarding" className="space-y-6 mt-6">
           <SubTabCaption>
-            The Day-0 "meet-and-greet" chat that runs once before the coaching loop and seeds the builder's profile. The 5 sections below are the pieces of its system prompt — all editable; saves take effect on the next onboarding chat.
+            The Day-0 "meet-and-greet" chat that runs once before the coaching loop and seeds the builder's profile. Two flows exist — the flow switch below controls which one builders get; each flow's prompt sections are editable and take effect on the next onboarding chat.
           </SubTabCaption>
 
-          {onboardingAgent && onboardingSections.length > 0 && (
+          {/* Flow switch — the onboarding_redesign_enabled knob. Rendered only
+              when the backend reports it (migration 20260804 applied). */}
+          {onboardingRedesign && (
+            <Card className="bg-white border-[#C8C8C8]">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-proxima-bold text-[#1E1E1E]">Active onboarding flow</h4>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-proxima font-semibold ${
+                          onboardingRedesign.enabled
+                            ? 'bg-[#4242EA]/10 text-[#4242EA]'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {onboardingRedesign.enabled ? 'Redesigned' : 'Legacy'}
+                      </span>
+                    </div>
+                    <p className="text-sm font-proxima text-[#666] mt-1">
+                      Redesigned = workshop-grounded opener, taste test, stage tracking, Coach Card.
+                      Legacy = the original 9-anchor conversation. Review the Concept Catalog in the
+                      Teaching Lab before enabling the redesigned flow for a cohort.
+                    </p>
+                  </div>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => handleToggleRedesign(!onboardingRedesign.enabled)}
+                      className={`shrink-0 rounded-lg px-4 py-2 text-sm font-proxima font-semibold border transition-colors disabled:opacity-50 ${
+                        onboardingRedesign.enabled
+                          ? 'border-[#C8C8C8] text-[#1E1E1E] hover:bg-slate-50'
+                          : 'border-[#4242EA] bg-[#4242EA] text-white hover:bg-[#4242EA]/90'
+                      }`}
+                    >
+                      {onboardingRedesign.enabled ? 'Switch to Legacy' : 'Switch to Redesigned'}
+                    </button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {onboardingAgent && onboardingV2Sections.length > 0 && (
             <div>
               <div className="flex items-center gap-2 mb-4">
                 <MessageSquare className="h-5 w-5 text-[#4242EA]" />
-                <h3 className="font-proxima-bold text-xl text-[#1E1E1E]">{onboardingAgent.name}</h3>
-                <InfoTip text="The Day-0 onboarding chat that runs before the v2 coach takes over. SSE-streamed text with optional browser dictation. It seeds the builder's profile (background, goals, learning style) and is the same coach persona that will accompany them through the program. Each section below is one part of its system prompt." />
+                <h3 className="font-proxima-bold text-xl text-[#1E1E1E]">
+                  Redesigned flow{onboardingRedesign?.enabled ? '' : ' (inactive)'}
+                </h3>
+                <InfoTip text="The 2026-08 redesign: the coach opens on the builder's admissions-workshop build, discovers their learning style via a 4-beat taste test (authored in the Concept Catalog), covers the mandatory core conversationally, and closes with the Coach Card playback. Stages and interactive moments are server-tracked." />
               </div>
+              {renderOnboardingSectionGroup(onboardingV2Sections)}
+            </div>
+          )}
 
-              <Tabs defaultValue={onboardingSections[0]?.key} className="w-full">
-                <TabsList className="bg-white border border-[#C8C8C8] p-1 h-auto flex-wrap justify-start">
-                  {onboardingSections.map((section) => (
-                    <TabsTrigger
-                      key={section.key}
-                      value={section.key}
-                      className="font-proxima data-[state=active]:bg-[#4242EA] data-[state=active]:text-white"
-                    >
-                      {section.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                <div className="mt-4">
-                  {onboardingSections.map((section) => (
-                    <TabsContent key={section.key} value={section.key} className="m-0">
-                      <TemplateCard
-                        phase={section.key}
-                        icon={MessageSquare}
-                        template={{
-                          name: section.label,
-                          description: section.description,
-                          content: section.content,
-                          id: section.id,
-                        }}
-                        canEdit={canEdit}
-                        onEdit={() => openEditor(section.id, section.content, 'content-generation', section.label)}
-                        onHistory={() => openHistory('content_generation_prompt', String(section.id), section.label)}
-                      />
-                    </TabsContent>
-                  ))}
-                </div>
-              </Tabs>
+          {onboardingAgent && onboardingLegacySections.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <MessageSquare className="h-5 w-5 text-[#4242EA]" />
+                <h3 className="font-proxima-bold text-xl text-[#1E1E1E]">
+                  Legacy flow{onboardingRedesign && !onboardingRedesign.enabled ? '' : onboardingRedesign ? ' (inactive)' : ''}
+                </h3>
+                <InfoTip text="The original Day-0 onboarding chat: 9 conversational anchors, no taste test, no stage tracking. Kept intact so the flow switch above is an instant rollback." />
+              </div>
+              {renderOnboardingSectionGroup(onboardingLegacySections)}
             </div>
           )}
         </TabsContent>
