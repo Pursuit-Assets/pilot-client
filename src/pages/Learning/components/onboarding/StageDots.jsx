@@ -1,17 +1,25 @@
-// Labeled 4-dot progress header for the redesigned onboarding session.
+// Labeled 3-chapter progress header for the redesigned onboarding session.
 // Stage values are SERVER-stamped (SSE `stage` events / session row) — the
 // client only renders. Order mirrors utils/onboardingStages.js STAGES.
-const STAGES = [
-  { slug: 'meet', label: 'Meet' },
-  { slug: 'build', label: 'Your Build' },
+export const STAGES = [
+  { slug: 'story', label: 'Getting to Know You' },
   { slug: 'learn', label: 'How You Learn' },
   { slug: 'ahead', label: 'Looking Ahead' },
 ];
 
+// Pre-refinement sessions may still report the retired meet/build slugs.
+export const normalizeStage = (stage) =>
+  (stage === 'meet' || stage === 'build') ? 'story' : stage;
+
+export const stageLabel = (stage) =>
+  STAGES.find((s) => s.slug === normalizeStage(stage))?.label || '';
+
 function StageDots({ stage, completed = false }) {
-  const activeIndex = completed ? STAGES.length : STAGES.findIndex((s) => s.slug === stage);
+  const activeIndex = completed
+    ? STAGES.length
+    : STAGES.findIndex((s) => s.slug === normalizeStage(stage));
   return (
-    <div className="flex items-center justify-center gap-4 py-3" aria-label="Conversation progress">
+    <div className="flex items-center justify-center gap-5 py-3" aria-label="Conversation progress">
       {STAGES.map((s, i) => {
         const reached = i <= activeIndex;
         const current = i === activeIndex && !completed;

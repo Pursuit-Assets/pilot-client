@@ -1,8 +1,7 @@
-import { Check } from 'lucide-react';
-
-// The taste-test pick — four tap cards, one per style family. Rendered when
-// the server emits `style_choices` (or on resume when beats are out but no
-// pick exists). Server option payload wins when present; DEFAULT_OPTIONS is
+// The taste-test pick — four tap cards, one per style family. Lives INLINE in
+// the transcript as a message item at its chronological position; tapping one
+// REPLACES the cards with a normal user bubble (the pick behaves exactly like
+// a sent message). Server option payload wins when present; DEFAULT_OPTIONS is
 // the resume fallback (stable product copy mirroring
 // utils/onboardingStages.js STYLE_FAMILIES).
 export const DEFAULT_OPTIONS = [
@@ -12,24 +11,10 @@ export const DEFAULT_OPTIONS = [
   { family: 'let_me_try', label: 'Let me try', description: 'Drop me into a real problem and let me work it' },
 ];
 
-function StyleChoiceCards({ options, pickedFamily, disabled, onPick }) {
+function StyleChoiceCards({ options, disabled, onPick }) {
   const list = Array.isArray(options) && options.length ? options : DEFAULT_OPTIONS;
-
-  // Collapsed state: the pick is made — show a single confirmation chip.
-  if (pickedFamily) {
-    const picked = list.find((o) => o.family === pickedFamily);
-    return (
-      <div className="mb-6 flex justify-center">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-pursuit-purple/10 text-pursuit-purple px-3 py-1.5 text-sm font-proxima font-semibold">
-          <Check className="w-4 h-4" />
-          {picked ? `${picked.label} — ${picked.description}` : 'Style picked'}
-        </span>
-      </div>
-    );
-  }
-
   return (
-    <div className="mb-6">
+    <div className="my-4">
       <p className="text-center text-xs font-proxima text-gray-500 mb-2">
         Which one landed for you? Tap one (or just tell your coach in words).
       </p>
@@ -39,7 +24,7 @@ function StyleChoiceCards({ options, pickedFamily, disabled, onPick }) {
             key={o.family}
             type="button"
             disabled={disabled}
-            onClick={() => onPick?.(o.family)}
+            onClick={() => onPick?.(o)}
             className="text-left rounded-xl border border-stardust bg-white px-4 py-3 hover:border-pursuit-purple hover:bg-pursuit-purple/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <span className="block font-proxima-bold text-sm text-carbon-black">{o.label}</span>

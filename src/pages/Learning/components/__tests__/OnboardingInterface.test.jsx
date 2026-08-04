@@ -280,7 +280,7 @@ describe('OnboardingInterface — redesign', () => {
     sessionId: 'sess-1',
     resumed: false,
     redesign: true,
-    stage: 'meet',
+    stage: 'story',
     stylePick: null,
     buildCard: { whatYouBuilt: 'A resume tailor that rewrites bullets per posting', artifactUrl: null },
   };
@@ -290,9 +290,10 @@ describe('OnboardingInterface — redesign', () => {
     await renderOnboarding();
     expect(screen.getByText(/your workshop build/i)).toBeInTheDocument();
     expect(screen.getByText(/resume tailor/i)).toBeInTheDocument();
-    // Labeled dots
-    expect(screen.getByText('Your Build')).toBeInTheDocument();
+    // Labeled dots — 3 chapters
+    expect(screen.getByText('Getting to Know You')).toBeInTheDocument();
     expect(screen.getByText('How You Learn')).toBeInTheDocument();
+    expect(screen.getByText('Looking Ahead')).toBeInTheDocument();
     // No artifact link — url was null (unvalidated links never render)
     expect(screen.queryByText(/view your build/i)).not.toBeInTheDocument();
   });
@@ -311,10 +312,10 @@ describe('OnboardingInterface — redesign', () => {
     startSession.mockResolvedValue({ sessionId: 'sess-1', resumed: false, buildReviewReady: true });
     await renderOnboarding();
     expect(screen.queryByText(/your workshop build/i)).not.toBeInTheDocument();
-    expect(screen.queryByText('Your Build')).not.toBeInTheDocument();
+    expect(screen.queryByText('Getting to Know You')).not.toBeInTheDocument();
   });
 
-  it('style_choices event renders the 4 tap cards; a tap sends the structured pick and collapses to a chip', async () => {
+  it('style_choices event renders the 4 tap cards; a tap sends the structured pick and becomes a sent user message', async () => {
     startSession.mockResolvedValue(REDESIGN_START);
     // Opening stream: coach_message beats + the style_choices control event.
     streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onCoachMessage, onStage, onStyleChoices, onDone }) => {
@@ -356,9 +357,23 @@ describe('OnboardingInterface — redesign', () => {
     expect(streamChat.mock.calls[0][2]).toBe('');
     expect(streamChat.mock.calls[0][3].meta).toEqual({ style_pick: 'show_me' });
 
-    // Cards collapsed to the confirmation chip; tap buttons gone.
+    // Cards replaced by a normal user bubble at the same spot — the pick
+    // behaves exactly like a sent message. Tap buttons gone.
     expect(screen.queryByRole('button', { name: /tell me/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/show me — worked example first/i)).toBeInTheDocument();
+    expect(screen.getByText('Show me — Worked example first')).toBeInTheDocument();
+  });
+
+  it('a stage transition renders a chapter divider in the transcript', async () => {
+    startSession.mockResolvedValue(REDESIGN_START);
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onStage, onDone }) => {
+      onText?.({ content: 'Welcome to the taste test.' });
+      onStage?.({ value: 'learn', label: 'How You Learn' });
+      onDone?.({ sequenceNumber: 3 });
+    });
+    await renderOnboarding();
+    // The label appears in BOTH the dots header and the new divider.
+    expect(screen.getAllByText('How You Learn').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole('separator')).toBeInTheDocument();
   });
 
   it('resume with beats delivered but no pick re-renders the tap cards (fallback options)', async () => {
