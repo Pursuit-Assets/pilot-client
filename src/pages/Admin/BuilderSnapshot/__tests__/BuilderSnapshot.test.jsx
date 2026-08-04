@@ -22,9 +22,10 @@ vi.mock('../../../../hooks/usePermissions', () => ({
 
 vi.mock('../../../../services/builderProfileInspectorApi', () => ({
   searchUsers: vi.fn(),
+  generateNarrative: vi.fn(),
 }));
 
-import { searchUsers } from '../../../../services/builderProfileInspectorApi';
+import { searchUsers, generateNarrative } from '../../../../services/builderProfileInspectorApi';
 
 // Mock useSearchParams so we can control ?userId= per test.
 let currentSearch = '';
@@ -584,5 +585,113 @@ describe('Readiness panel', () => {
     await renderWithReadiness();
     expect(screen.queryByText(/readiness score/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/overall score/i)).not.toBeInTheDocument();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Narrative panel — the evidence-cited "case both ways" summary.
+// Two properties are load-bearing: it never reaches a verdict, and every claim
+// shows the source it rests on.
+// ---------------------------------------------------------------------------
+const NARRATIVE = {
+  stale: false,
+  generated_at: '2026-08-03T20:00:00Z',
+  model: 'anthropic/claude-sonnet-5',
+  sessions_considered: 9,
+  summary: {
+    headline: 'Dennys is at the 58th percentile of 77 peers with 13 skills improved and 0 declined.',
+    case_for: [
+      {
+        claim: 'Produced the full four-part competitive analysis unprompted.',
+        evidence: 'Dennys named five real, differentiated competitors and tied each to its business model.',
+        task_id: 9078, task_title: 'Learn: Value Propositions', skill: 'analyze-industry-market', at: '2026-07-27T17:59:51Z',
+      },
+    ],
+    case_against: [
+      {
+        claim: 'Branching has been a persistent gap across all git sessions.',
+        evidence: 'The full workflow — pull, branch, commit, PR — has not been produced unprompted in any session.',
+        task_id: 8627, task_title: 'Learn: GitHub Workflows', skill: 'git-version-control', at: '2026-07-23T16:55:25Z',
+      },
+    ],
+    watch_items: [
+      {
+        claim: 'Confirm he can produce a full git workflow unprompted.',
+        evidence: 'Add the branching step before starting work.',
+        task_id: 8627, task_title: 'Learn: GitHub Workflows', skill: null, at: '2026-07-23T16:55:25Z',
+      },
+    ],
+  },
+};
+
+const renderWithNarrative = async (narrative) => {
+  currentSearch = 'userId=729';
+  setRoutes({ snapshot: okResponse({ ...REAL_SHAPE_SNAPSHOT, readiness: READINESS, narrative }) });
+  await act(async () => { renderUI(); });
+  await screen.findByText('Dennys Antunish');
+};
+
+describe('Narrative panel', () => {
+  beforeEach(() => { generateNarrative.mockReset(); });
+
+  it('shows both cases with equal weight and reaches no verdict', async () => {
+    await renderWithNarrative(NARRATIVE);
+    expect(screen.getByText('The case both ways')).toBeInTheDocument();
+    expect(screen.getByText('Case for')).toBeInTheDocument();
+    expect(screen.getByText('Case against')).toBeInTheDocument();
+    // It must never tell staff what to do — that is the offer decision.
+    expect(screen.queryByText(/recommend/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/extend an offer to/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/do not extend/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the source task and the verbatim quote under every claim', async () => {
+    await renderWithNarrative(NARRATIVE);
+    expect(screen.getByText(/Produced the full four-part competitive analysis/)).toBeInTheDocument();
+    expect(screen.getByText(/named five real, differentiated competitors/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Learn: GitHub Workflows/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('offers generation instead of auto-running it when no summary exists', async () => {
+    await renderWithNarrative(null);
+    // A page load must never trigger an LLM call.
+    expect(generateNarrative).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /Write the summary/ })).toBeInTheDocument();
+  });
+
+  it('generates on click and renders the result', async () => {
+    generateNarrative.mockResolvedValue(NARRATIVE);
+    await renderWithNarrative(null);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Write the summary/ })); });
+    expect(generateNarrative).toHaveBeenCalledWith('test-token', 729);
+    expect(screen.getByText(/58th percentile of 77 peers/)).toBeInTheDocument();
+  });
+
+  it('flags a summary as stale once the builder has been graded again', async () => {
+    await renderWithNarrative({ ...NARRATIVE, stale: true });
+    expect(screen.getByText(/graded since the summary was written/)).toBeInTheDocument();
+  });
+
+  it('explains an insufficient-evidence refusal in plain language', async () => {
+    const err = new Error('Not enough graded evidence to write a summary yet');
+    err.code = 'INSUFFICIENT_EVIDENCE';
+    generateNarrative.mockRejectedValue(err);
+    await renderWithNarrative(null);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Write the summary/ })); });
+    expect(screen.getByText(/Not enough graded work yet/)).toBeInTheDocument();
+  });
+
+  it('discloses provenance so a stale read cannot pass as current', async () => {
+    await renderWithNarrative(NARRATIVE);
+    expect(screen.getByText(/from 9 graded sessions/)).toBeInTheDocument();
+    expect(screen.getByText(/claude-sonnet-5/)).toBeInTheDocument();
+  });
+
+  it('keeps watch items behind a toggle so the two cases stay the focus', async () => {
+    await renderWithNarrative(NARRATIVE);
+    expect(screen.queryByText(/Confirm he can produce a full git workflow/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /What to check next/ }));
+    expect(screen.getByText(/Confirm he can produce a full git workflow/)).toBeInTheDocument();
   });
 });

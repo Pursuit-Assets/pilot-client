@@ -44,6 +44,30 @@ export const getSnapshot = async (token, userId) => {
 };
 
 /**
+ * Generate (or regenerate) the builder's evidence-cited narrative summary.
+ *
+ * This costs one LLM call over the builder's full graded history, so it is only
+ * ever fired by an explicit user action — never on page load. The cached copy
+ * arrives on the snapshot as `narrative`, carrying a `stale` flag when the
+ * builder has been graded since it was written.
+ *
+ * Expected non-200s worth handling in the UI:
+ *   422 INSUFFICIENT_EVIDENCE — fewer than 3 graded evidence items
+ *   502 GENERATION_FAILED / PARSE_FAILURE / NO_VERIFIABLE_CLAIMS
+ *
+ * @param {string} token
+ * @param {number} userId
+ * @returns {Promise<{summary, stale, generated_at, model, sessions_considered, dropped_claims}>}
+ */
+export const generateNarrative = async (token, userId) => {
+  return fetchWithAuth(
+    `/api/admin/builder-profiles/${userId}/narrative`,
+    { method: 'POST' },
+    token,
+  );
+};
+
+/**
  * Trigger a mock-flow scenario for the given user (or a sentinel mock user
  * if userId is omitted). Server refuses to operate on builders outside the
  * designated mock test cohort.

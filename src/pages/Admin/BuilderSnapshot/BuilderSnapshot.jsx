@@ -2,13 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import useAuthStore from '../../../stores/authStore';
 import { usePermissions } from '../../../hooks/usePermissions';
-import { searchUsers } from '../../../services/builderProfileInspectorApi';
+import { searchUsers, generateNarrative } from '../../../services/builderProfileInspectorApi';
 import BuilderSnapshotHero from './components/BuilderSnapshotHero';
 import BuilderSnapshotSkillsPanel from './components/BuilderSnapshotSkillsPanel';
 import BuilderSnapshotStoryGrid from './components/BuilderSnapshotStoryGrid';
 import BuilderSnapshotAchievements from './components/BuilderSnapshotAchievements';
 import BuilderSnapshotTimeline from './components/BuilderSnapshotTimeline';
 import BuilderSnapshotReadiness from './components/BuilderSnapshotReadiness';
+import BuilderSnapshotNarrative from './components/BuilderSnapshotNarrative';
 
 const BRAND = '#4242EA';
 
@@ -172,6 +173,11 @@ const BuilderSnapshot = ({ embedded = false }) => {
   // Dreyfus levels) and `courseBands` (which levels are REACHABLE per course).
   // Comes free on the same /v2-coach-engine bundle the taxonomy arrives on.
   const [proficiencyScale, setProficiencyScale] = useState(null);
+  // Narrative state is held here rather than in the panel so a regeneration
+  // survives the panel re-rendering, and so it resets cleanly per builder.
+  const [narrative, setNarrative] = useState(null);
+  const [narrativeBusy, setNarrativeBusy] = useState(false);
+  const [narrativeError, setNarrativeError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState(null); // last HTTP status
@@ -214,9 +220,14 @@ const BuilderSnapshot = ({ embedded = false }) => {
         }
         const data = await res.json();
         setSnapshot(data);
+        // The cached narrative rides along on the snapshot; a page load never
+        // generates one. Reset any prior builder's generate-error with it.
+        setNarrative(data.narrative || null);
+        setNarrativeError(null);
       } catch (e) {
         setError(e.message || 'Failed to load snapshot');
         setSnapshot(null);
+        setNarrative(null);
       } finally {
         setLoading(false);
       }
@@ -271,6 +282,22 @@ const BuilderSnapshot = ({ embedded = false }) => {
     },
     [searchParams, setSearchParams],
   );
+
+  const handleGenerateNarrative = useCallback(async () => {
+    if (!selectedUserId || narrativeBusy) return;
+    setNarrativeBusy(true);
+    setNarrativeError(null);
+    try {
+      const result = await generateNarrative(token, selectedUserId);
+      setNarrative(result);
+    } catch (e) {
+      // fetchWithAuth surfaces the server's message; the code distinguishes
+      // "not enough evidence yet" (expected) from a real generation failure.
+      setNarrativeError({ message: e.message || 'Could not generate the summary.', code: e.code || e.body?.code });
+    } finally {
+      setNarrativeBusy(false);
+    }
+  }, [selectedUserId, token, narrativeBusy]);
 
   const handleClearUser = useCallback(() => {
     setSelectedUserId(null);
@@ -429,6 +456,13 @@ const BuilderSnapshot = ({ embedded = false }) => {
             <BuilderSnapshotReadiness
               readiness={snapshot.readiness}
               courseBands={proficiencyScale?.courseBands}
+            />
+
+            <BuilderSnapshotNarrative
+              narrative={narrative}
+              onGenerate={handleGenerateNarrative}
+              generating={narrativeBusy}
+              error={narrativeError}
             />
 
             <BuilderSnapshotSkillsPanel
