@@ -1,5 +1,7 @@
 import React from 'react';
 import { Users, TrendingUp, LifeBuoy, Activity, ArrowUp, ArrowRight, ArrowDown } from 'lucide-react';
+// Shared so this panel can't drift from the other Coach tabs.
+import { DREYFUS_LABELS } from '../../coachDreyfus';
 
 /**
  * BuilderSnapshotReadiness
@@ -32,8 +34,6 @@ import { Users, TrendingUp, LifeBuoy, Activity, ArrowUp, ArrowRight, ArrowDown }
  *                course. Not a target: it says 4-5 is out of scope for L1, not
  *                where L1 should land.
  */
-
-const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
 
 // Sequential ramp for ordinal Dreyfus stages — the same grey→indigo ramp the
 // Skill Profile meters use, so a stage reads identically across the page.

@@ -452,7 +452,12 @@ describe('Strongest Skills panel', () => {
     const weakest = headings.indexOf('Reason About Models');
     expect(strongest).toBeGreaterThanOrEqual(0);
     expect(strongest).toBeLessThan(weakest);
-    expect(screen.getByText(/L4 Proficient/)).toBeInTheDocument();
+    // The crest reads "#1 · <stage>" — bare stage name, no L-number. The
+    // L-prefix was dropped repo-wide (coachDreyfus) because a leading digit
+    // implies a score the Dreyfus scale doesn't carry. Asserting rank and label
+    // together also pins that the level-4 skill sorted first.
+    expect(screen.getByText(/#1 · Proficient/)).toBeInTheDocument();
+    expect(screen.queryByText(/L4/)).not.toBeInTheDocument();
   });
 
   it('excludes onboarding priors (task_id: null) from the observation count', async () => {

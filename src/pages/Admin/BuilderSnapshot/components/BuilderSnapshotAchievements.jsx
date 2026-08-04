@@ -1,5 +1,9 @@
 import React, { useMemo } from 'react';
 import { Trophy, Award } from 'lucide-react';
+// Shared so this panel can't drift from the other Coach tabs. `levelLabel`
+// renders the bare stage name — the L-number was deliberately dropped because
+// a leading digit implies a score the Dreyfus scale doesn't carry.
+import { levelLabel } from '../../coachDreyfus';
 
 /**
  * BuilderSnapshotAchievements
@@ -29,8 +33,6 @@ import { Trophy, Award } from 'lucide-react';
  *   - skillTaxonomy:    { skills: { [slug]: { name } } } — resolves slug → name
  *   - skillProficiency: { [slug]: { level, confidence } } — the ranking key
  */
-const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
-
 // Crest styling by Dreyfus level. Deliberately NOT a "how impressive" ramp —
 // Level 1 at week 4 of L1 is on track, so the low end reads neutral, not poor.
 const LEVEL_CREST = [
@@ -110,7 +112,7 @@ const BuilderSnapshotAchievements = ({ competencies, skillTaxonomy, skillProfici
           {items.map((item, idx) => {
             const crest = crestFor(item.level);
             const stage = Number.isInteger(item.level)
-              ? `L${item.level} ${DREYFUS_LABELS[item.level]}`
+              ? levelLabel(item.level)
               : 'Not yet levelled';
             return (
               <li
