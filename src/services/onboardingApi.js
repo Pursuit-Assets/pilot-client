@@ -42,6 +42,41 @@ export async function completeSession(token, sessionId, { durationSeconds }) {
   return res.json();
 }
 
+/**
+ * GET the builder's Coach Card — the coach's read on them (background, goals,
+ * learning profile, teaching method). Returns { card } (card may be null).
+ */
+export async function getCoachCard(token) {
+  const res = await fetch(`${API_URL}/api/onboarding-session/coach-card`, {
+    headers: getHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to load coach card: ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * POST a correction to the Coach Card. Corrections write intake_confirmed
+ * provenance server-side (the builder correcting the card is the highest-
+ * confidence signal there is).
+ * body: { section: 'background'|'goals'|'learning_profile', field, value }
+ *   or  { section: 'teaching_method', value }
+ */
+export async function correctCoachCard(token, correction) {
+  const res = await fetch(`${API_URL}/api/onboarding-session/coach-card/corrections`, {
+    method: 'POST',
+    headers: getHeaders(token),
+    body: JSON.stringify(correction),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to save correction: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function abandonSession(token, sessionId) {
   const res = await fetch(`${API_URL}/api/onboarding-session/${encodeURIComponent(sessionId)}/abandon`, {
     method: 'POST',
@@ -62,20 +97,27 @@ export async function abandonSession(token, sessionId) {
  * first anchor question via buildOpeningLine.
  *
  * Callbacks fire as the SSE stream arrives:
- *   onText({ content })       — incremental chunk
- *   onDone({ sequenceNumber }) — stream finished cleanly
- *   onError({ error })         — server-emitted SSE error event
+ *   onText({ content })          — incremental chunk (streamed coach turn)
+ *   onCoachMessage({ content })  — a COMPLETE coach bubble (redesign: the
+ *                                  server-sent authored taste-test beats)
+ *   onStage({ value })           — server-stamped stage transition (redesign)
+ *   onStyleChoices({ options })  — render the style tap cards (redesign)
+ *   onDone({ sequenceNumber })   — stream finished cleanly
+ *   onError({ error })           — server-emitted SSE error event
+ *
+ * `meta` rides in the POST body for structured turns (redesign): a style-card
+ * tap sends { style_pick: '<family>' } with an empty message.
  *
  * `signal` is an AbortSignal — abort to tear down an in-flight stream
  * (e.g., on unmount). Returns when the stream ends, errors, or is aborted.
  */
-export async function streamChat(token, sessionId, message, { onText, onDone, onError, signal } = {}) {
+export async function streamChat(token, sessionId, message, { onText, onCoachMessage, onStage, onStyleChoices, onDone, onError, signal, meta } = {}) {
   const res = await fetch(
     `${API_URL}/api/onboarding-session/${encodeURIComponent(sessionId)}/chat`,
     {
       method: 'POST',
       headers: getHeaders(token),
-      body: JSON.stringify({ message: message || '' }),
+      body: JSON.stringify({ message: message || '', ...(meta ? { meta } : {}) }),
       signal,
     }
   );
@@ -120,6 +162,12 @@ export async function streamChat(token, sessionId, message, { onText, onDone, on
       }
       if (data.type === 'text') {
         onText?.(data);
+      } else if (data.type === 'coach_message') {
+        onCoachMessage?.(data);
+      } else if (data.type === 'stage') {
+        onStage?.(data);
+      } else if (data.type === 'style_choices') {
+        onStyleChoices?.(data);
       } else if (data.type === 'done') {
         sawDone = true;
         onDone?.(data);
