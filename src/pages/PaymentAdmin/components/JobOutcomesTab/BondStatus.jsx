@@ -1,182 +1,110 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../../components/ui/table';
-import { Badge } from '../../../../components/ui/badge';
-import { layoffHistory, pauseHistory, bondJobChanges } from './bondData';
-import { AlertTriangle, Pause, CheckCircle2 } from 'lucide-react';
+import { Ban, CheckCircle2, PlayCircle } from 'lucide-react';
 
-const fmtDate = (iso) => {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-};
 const fmtCurrency = (n) => {
-  if (n == null) return '—';
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+  if (n == null) return 'TBD';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
 };
 
-const StatCard = ({ label, value, color, icon: Icon }) => (
-  <Card>
-    <CardContent className="pt-6">
-      <div className="flex items-center justify-between">
-        <div className="text-xs uppercase tracking-wide text-gray-500 font-medium">{label}</div>
-        {Icon && <Icon className="h-4 w-4 text-gray-400" />}
-      </div>
-      <div className="text-3xl font-bold mt-1" style={{ color: color || '#111827' }}>{value}</div>
-    </CardContent>
-  </Card>
+// Curated Invoice Activity (ops queue) — July / August 2026
+const NEW_INVOICES_JULY = [
+  { name: 'Josue Villalona', amount: 1312.5, method: 'Bill.com', notes: 'New job — first invoice July 2026' },
+  { name: 'Edwin Codrington', amount: 1312.5, method: 'Bill.com', notes: 'Off pause — reinstate at regular amount' },
+  { name: 'Destiny Joyner', amount: 1062.5, method: 'Bill.com', notes: 'Off pause — reinstate at regular amount' },
+  { name: 'Ariel Chen', amount: null, method: 'Pursuit Managed', notes: 'Amount based on July paycheck; Pursuit collects directly' },
+  { name: 'Kelvin Saldana', amount: null, method: 'Pursuit Managed', notes: 'Amount based on July paycheck; Pursuit collects directly' },
+  { name: 'Jacob Williams', amount: 350, method: 'Pursuit Managed', notes: 'Payment plan: $350/mo for July & August — total invoice amount based on July paycheck; Pursuit collects directly' },
+];
+
+const NEW_INVOICES_AUGUST = [
+  { name: 'Kalila Green', amount: 1093.75, method: 'Direct Deposit', notes: 'New job — direct deposit set up; begin August 2026' },
+  { name: 'Ethan Davey', amount: 1062.5, method: 'Pursuit Managed', notes: 'New job — Pursuit managed; begin August 2026' },
+  { name: 'Daniel Chillemi', amount: 350, method: 'Pursuit Managed', notes: 'Payment plan: $350/mo × 6 months, then $1,800/mo × 6 months to catch up; begin August 2026' },
+  { name: 'Rajiv Sukhnandan', amount: 1100, method: 'Direct Deposit', notes: 'New job — direct deposit set up; begin August 2026' },
+];
+
+const STOP_INVOICING = [
+  { name: 'Anthony Cannonier', amount: 1125, method: 'Unemployed', notes: 'Pause until re-employed — do not invoice · job loss July' },
+  { name: 'Zane Ahmed', amount: 1125, method: 'Unemployed', notes: 'Pause until re-employed — do not invoice · job loss July' },
+  { name: 'Raymond Udeogu', amount: 1000, method: 'Unemployed', notes: 'Informed in July (need to confirm exact dates) — remove from August invoicing list' },
+];
+
+const InvoiceTable = ({ rows }) => (
+  <div className="border rounded-lg overflow-hidden">
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead className="text-right">Monthly Amount</TableHead>
+          <TableHead>Payment Method</TableHead>
+          <TableHead>Notes</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={row.name}>
+            <TableCell className="font-medium">{row.name}</TableCell>
+            <TableCell className="text-right tabular-nums">{fmtCurrency(row.amount)}</TableCell>
+            <TableCell className="text-sm text-gray-700">{row.method}</TableCell>
+            <TableCell className="text-xs text-gray-500 max-w-md">{row.notes}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </div>
 );
 
 const BondStatus = () => {
-  const stats = useMemo(() => {
-    const activeContract = bondJobChanges.filter(b => b.contract === true && b.salary != null).length;
-    const pendingVerify = bondJobChanges.filter(b => b.contract === false).length;
-    const upcoming      = bondJobChanges.filter(b => b.startDate && new Date(b.startDate) > new Date()).length;
-    const totalMonthly  = bondJobChanges
-      .filter(b => b.contract === true && b.monthly != null)
-      .reduce((s, b) => s + b.monthly, 0);
-    return { activeContract, pendingVerify, upcoming, totalMonthly };
-  }, []);
-
-  // Group layoffs by year-month for the timeline
-  const layoffsSorted = [...layoffHistory].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const newInvoiceCount = NEW_INVOICES_JULY.length + NEW_INVOICES_AUGUST.length;
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard
-          label="Active Bond Contracts"
-          value={stats.activeContract}
-          icon={CheckCircle2}
-          color="#16a34a"
-        />
-        <StatCard
-          label="Pending Verification"
-          value={stats.pendingVerify}
-          icon={AlertTriangle}
-          color="#d97706"
-        />
-        <StatCard
-          label="Future Start Date"
-          value={stats.upcoming}
-        />
-        <StatCard
-          label="Monthly Invoice Total"
-          value={fmtCurrency(stats.totalMonthly)}
-          color="#4242EA"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Pause className="h-4 w-4 text-amber-600" />
-              Active Invoice Pauses
-            </CardTitle>
-            <p className="text-xs text-gray-500 mt-1">{pauseHistory.length} fellows on payment pause</p>
-          </CardHeader>
-          <CardContent>
-            <div className="border rounded-lg overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Fellow</TableHead>
-                    <TableHead>Pause Period</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pauseHistory.map((p, i) => (
-                    <TableRow key={i}>
-                      <TableCell className="font-medium">{p.name}</TableCell>
-                      <TableCell className="text-sm text-gray-600">{p.period || '—'}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-red-600" />
-              Layoff History
-            </CardTitle>
-            <p className="text-xs text-gray-500 mt-1">{layoffHistory.length} layoffs / departures tracked</p>
-          </CardHeader>
-          <CardContent>
-            <div className="border rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
-              <Table>
-                <TableHeader className="sticky top-0 bg-white">
-                  <TableRow>
-                    <TableHead>Fellow</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Notes</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {layoffsSorted.map((l, i) => (
-                    <TableRow key={i}>
-                      <TableCell className="font-medium">{l.name}</TableCell>
-                      <TableCell className="text-sm text-gray-600">{fmtDate(l.date)}</TableCell>
-                      <TableCell className="text-xs text-gray-500">{l.detail || ''}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Bond Job Changes — Current Roster</CardTitle>
-          <p className="text-xs text-gray-500 mt-1">From the Bond Job Changes tracker sheet</p>
-        </CardHeader>
-        <CardContent>
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Fellow</TableHead>
-                  <TableHead>Position</TableHead>
-                  <TableHead className="text-right">Salary</TableHead>
-                  <TableHead>Start Date</TableHead>
-                  <TableHead className="text-right">Monthly</TableHead>
-                  <TableHead>Contract</TableHead>
-                  <TableHead>Notes</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {bondJobChanges.map((b, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="font-medium">{b.name}</TableCell>
-                    <TableCell className="text-sm text-gray-700">{b.title || <span className="text-gray-400">—</span>}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtCurrency(b.salary)}</TableCell>
-                    <TableCell className="text-sm text-gray-600">{b.startDate || '—'}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtCurrency(b.monthly)}</TableCell>
-                    <TableCell>
-                      {b.contract === true && (
-                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Signed</Badge>
-                      )}
-                      {b.contract === false && (
-                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Pending</Badge>
-                      )}
-                      {b.contract == null && <span className="text-gray-400 text-xs">—</span>}
-                    </TableCell>
-                    <TableCell className="text-xs text-gray-600 max-w-xs truncate" title={b.notes}>
-                      {b.notes || ''}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <PlayCircle className="h-4 w-4 text-[#4242EA]" />
+          Invoice Activity
+        </CardTitle>
+        <p className="text-xs text-gray-500 mt-1">
+          Ops queue · {newInvoiceCount} new · {STOP_INVOICING.length} stop · notes include reason and payment method
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
+              New invoices — start invoicing
+            </h3>
           </div>
-        </CardContent>
-      </Card>
-    </div>
+
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">July</p>
+          <InvoiceTable rows={NEW_INVOICES_JULY} />
+
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mt-4 mb-2">
+            Heads up — August
+          </p>
+          <InvoiceTable rows={NEW_INVOICES_AUGUST} />
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Ban className="h-4 w-4 text-red-600" />
+            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
+              Stop invoicing — job loss
+            </h3>
+          </div>
+          <p className="text-xs text-gray-500 mb-2">July · pause / remove from August list</p>
+          <InvoiceTable rows={STOP_INVOICING} />
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 

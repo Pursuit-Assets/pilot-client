@@ -8,7 +8,6 @@ import AlumniList from './AlumniList';
 import EmployersTable from './EmployersTable';
 import AlumniDetailModal from './AlumniDetailModal';
 import SalaryAnalysis from './SalaryAnalysis';
-import BondStatus from './BondStatus';
 import {
   mockOverview,
   mockCohorts,
@@ -145,12 +144,11 @@ const JobOutcomesTab = () => {
       )}
 
       <Tabs defaultValue="kpis" className="w-full">
-        <TabsList className="grid w-full grid-cols-5 max-w-3xl">
+        <TabsList className="grid w-full grid-cols-4 max-w-3xl">
           <TabsTrigger value="kpis">Overview</TabsTrigger>
           <TabsTrigger value="alumni">Alumni</TabsTrigger>
           <TabsTrigger value="employers">Employers</TabsTrigger>
           <TabsTrigger value="salary">Salary Analysis</TabsTrigger>
-          <TabsTrigger value="bond">Payment Status</TabsTrigger>
         </TabsList>
 
         <TabsContent value="kpis" className="mt-6">
@@ -170,10 +168,6 @@ const JobOutcomesTab = () => {
 
         <TabsContent value="salary" className="mt-6">
           <SalaryAnalysis />
-        </TabsContent>
-
-        <TabsContent value="bond" className="mt-6">
-          <BondStatus />
         </TabsContent>
       </Tabs>
 
