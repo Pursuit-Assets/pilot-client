@@ -8,6 +8,7 @@ import {
   listGoldenTasks,
   runArchetype,
 } from '../../../services/goldenDatasetApi';
+import { levelLabel } from '../coachDreyfus';
 
 const BRAND = '#4242EA';
 
@@ -505,11 +506,11 @@ const DetailPanel = ({ archetype, tasks, selectedTaskId, onSelectTask, selectedT
               <Chip tone={methodTone(derived.teachingMethod)}>{methodLabel(derived.teachingMethod)}</Chip>
               <Chip tone={difficultyTone(derived.difficultyLevel)}>
                 {Number.isInteger(derived.targetLevel)
-                  ? `targets L${derived.targetLevel} ${difficultyLabel(derived.difficultyLevel)}`
+                  ? `targets ${difficultyLabel(derived.difficultyLevel)}`
                   : difficultyLabel(derived.difficultyLevel)}
               </Chip>
               {Number.isInteger(derived.currentLevel) && (
-                <Chip tone="slate">now L{derived.currentLevel}</Chip>
+                <Chip tone="slate">now {levelLabel(derived.currentLevel)}</Chip>
               )}
               {derived.difficultyModifier === '+20%' && <Chip tone="red">+20% interview</Chip>}
             </div>

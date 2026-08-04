@@ -1085,7 +1085,32 @@ function ApplicantDashboard() {
                       </div>
                     )}
                     
-                    {/* Deferred notice with opt-in button */}
+                    {/* Returning applicant: reinstated and awaiting staff outreach.
+                        Shown instead of nothing — after reinstatement both enrollment_status and
+                        program_admission_status are back to 'pending', so neither the deferred
+                        notice nor the pause button renders and the applicant would otherwise get
+                        no acknowledgement that their reinstatement landed. */}
+                    {section.key === 'application' && status === 'submitted'
+                      && applicantStage?.reinstatement_status
+                      && applicantStage.reinstatement_status !== 'resolved'
+                      && applicantStage?.enrollment_status !== 'deferred' && (
+                      <div className="bg-blue-50 border border-blue-300 rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span>👋</span>
+                          <strong className="text-blue-800 font-semibold">Welcome back — we have your application</strong>
+                        </div>
+                        <p className="text-sm text-blue-800">
+                          Your application has been reinstated and is being reviewed again. Someone from admissions will reach out to confirm your plans.
+                        </p>
+                        {applicantStage.reinstated_at && (
+                          <p className="text-xs text-blue-600 mt-2">
+                            Reinstated on {new Date(applicantStage.reinstated_at).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Deferred notice with reinstate button */}
                     {section.key === 'application' && status === 'submitted' && applicantStage?.enrollment_status === 'deferred' && (
                       <div className="bg-amber-50 border border-amber-400 rounded-xl p-4">
                         <div className="flex items-center gap-2 mb-2">
@@ -1093,62 +1118,97 @@ function ApplicantDashboard() {
                           <strong className="text-amber-700 font-semibold">Application Deferred</strong>
                         </div>
                         <p className="text-sm text-amber-700 mb-1">
-                          Your application has been deferred. When you're ready to rejoin the program, click the button below to opt back in to the next cohort.
+                          Your application is paused. When you're ready to rejoin, reinstate it and choose which cohort you'd like to be considered for.
                         </p>
                         {applicantStage.deferred_at && (
                           <p className="text-xs text-amber-600 mb-3">
-                            Deferred on {new Date(applicantStage.deferred_at).toLocaleDateString()}
+                            Paused on {new Date(applicantStage.deferred_at).toLocaleDateString()}
                           </p>
                         )}
                         <button
                           onClick={async () => {
-                            const result = await Swal.fire({
-                              title: 'Ready to Rejoin?',
-                              html: `<p>If you opt back in, your application will be added to the next cohort pool.</p><p style="color: #666; margin-top: 10px;">You may need to complete additional requirements like workshop attendance.</p>`,
-                              icon: 'question',
+                            // Cohort selection lives HERE, not on the defer button. Pausing is
+                            // "not now" and takes no cohort; reinstating is the moment a cohort is
+                            // genuinely chosen, from whatever is open at that time.
+                            let cohortList = [];
+                            try {
+                              const token = localStorage.getItem('applicantToken');
+                              const res = await fetch(`${import.meta.env.VITE_API_URL}/api/applications/cohorts/available`, {
+                                headers: { 'Authorization': `Bearer ${token}` }
+                              });
+                              const data = await res.json();
+                              cohortList = Array.isArray(data?.cohorts) ? data.cohorts : [];
+                            } catch (err) {
+                              console.warn('Failed to load cohorts for reinstatement:', err);
+                            }
+
+                            if (cohortList.length === 0) {
+                              await Swal.fire({
+                                icon: 'info',
+                                title: 'No Cohorts Open Right Now',
+                                text: 'There are no upcoming cohorts open to rejoin at the moment. Please check back soon, or contact admissions.',
+                                confirmButtonColor: '#4242ea'
+                              });
+                              return;
+                            }
+
+                            const cohortOptions = cohortList.reduce((acc, c) => {
+                              acc[c.cohort_id] = `${c.name} — starts ${new Date(c.start_date).toLocaleDateString()}`;
+                              return acc;
+                            }, {});
+
+                            const { value: chosenCohortId, isConfirmed } = await Swal.fire({
+                              title: 'Which cohort would you like to join?',
+                              html: `<p style="color: #555;">Your application will be reinstated and reviewed for the cohort you pick. Someone from admissions will reach out to confirm your plans.</p>`,
+                              input: 'select',
+                              inputOptions: cohortOptions,
+                              inputPlaceholder: 'Select a cohort',
                               showCancelButton: true,
-                              confirmButtonText: 'Yes, Opt Me Back In',
+                              confirmButtonText: 'Reinstate My Application',
                               cancelButtonText: 'Cancel',
                               confirmButtonColor: '#4242ea',
-                              cancelButtonColor: '#6c757d'
+                              cancelButtonColor: '#6c757d',
+                              inputValidator: (value) => !value && 'Please select a cohort'
                             });
 
-                            if (result.isConfirmed) {
-                              try {
-                                const token = localStorage.getItem('applicantToken');
-                                const response = await fetch(`${import.meta.env.VITE_API_URL}/api/applications/undefer`, {
-                                  method: 'POST',
-                                  headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${token}`
-                                  }
-                                });
+                            if (!isConfirmed || !chosenCohortId) return;
 
-                                if (!response.ok) {
-                                  const error = await response.json();
-                                  throw new Error(error.error || 'Failed to opt back in');
-                                }
+                            try {
+                              const token = localStorage.getItem('applicantToken');
+                              const response = await fetch(`${import.meta.env.VITE_API_URL}/api/applications/undefer`, {
+                                method: 'POST',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({ cohortId: chosenCohortId })
+                              });
 
-                                await Swal.fire({
-                                  icon: 'success',
-                                  title: 'Welcome Back!',
-                                  text: 'Your application has been reactivated. You are now in the pool for the next cohort.',
-                                  confirmButtonColor: '#4242ea'
-                                });
-                                window.location.reload();
-                              } catch (error) {
-                                await Swal.fire({
-                                  icon: 'error',
-                                  title: 'Error',
-                                  text: error.message || 'Failed to opt back in.',
-                                  confirmButtonColor: '#dc3545'
-                                });
+                              if (!response.ok) {
+                                const error = await response.json();
+                                throw new Error(error.error || 'Failed to reinstate your application');
                               }
+
+                              const undeferResult = await response.json();
+                              await Swal.fire({
+                                icon: 'success',
+                                title: 'Welcome Back!',
+                                text: undeferResult.message || 'Your application has been reinstated. Someone from admissions will reach out to confirm your plans.',
+                                confirmButtonColor: '#4242ea'
+                              });
+                              window.location.reload();
+                            } catch (error) {
+                              await Swal.fire({
+                                icon: 'error',
+                                title: 'Error',
+                                text: error.message || 'Failed to reinstate your application.',
+                                confirmButtonColor: '#dc3545'
+                              });
                             }
                           }}
                           className="w-full text-sm text-[#4242ea] border border-[#4242ea] rounded-xl py-2 px-4 hover:bg-[#4242ea] hover:text-white transition-colors"
                         >
-                          Opt Back In to Next Cohort
+                          Reinstate My Application
                         </button>
                       </div>
                     )}
@@ -1157,48 +1217,24 @@ function ApplicantDashboard() {
                     {section.key === 'application' && status === 'submitted' && currentApplicantId && applicantStage?.program_admission_status === 'accepted' && applicantStage?.enrollment_status !== 'deferred' && (
                       <button
                         onClick={async () => {
-                          // Fetch current + next application cohorts and keep the later option.
-                          let cohortList = [];
-                          try {
-                            const cohortsRes = await fetch(`${import.meta.env.VITE_API_URL}/api/applications/cohort-options`, {
-                              headers: databaseService.getAuthHeaders()
-                            });
-                            const cohortsData = await cohortsRes.json();
-                            cohortList = Array.isArray(cohortsData) ? cohortsData.slice(1) : [];
-                          } catch (err) {
-                            console.warn('Failed to load cohorts:', err);
-                          }
-
-                          if (cohortList.length === 0) {
-                            await Swal.fire({
-                              icon: 'info',
-                              title: 'No Future Cohorts Available',
-                              text: 'There are no later cohorts available for enrollment deferral right now. Please check back soon.',
-                              confirmButtonColor: '#4242ea'
-                            });
-                            return;
-                          }
-
-                          const cohortOptions = cohortList.reduce((acc, c) => {
-                            acc[c.cohort_id] = `${c.name} — starts ${new Date(c.start_date).toLocaleDateString()}`;
-                            return acc;
-                          }, {});
-
-                          const { value: chosenCohortId, isConfirmed } = await Swal.fire({
-                            title: 'Defer enrollment to which cohort?',
-                            html: '<p style="color: #555;">Pick the later cohort where you want to defer your accepted seat.</p>',
-                            input: 'select',
-                            inputOptions: cohortOptions,
-                            inputPlaceholder: 'Select a cohort',
+                          // No cohort picker: pausing is "not now", not a move to a later cohort.
+                          // The applicant chooses a cohort when they REINSTATE (see the deferred
+                          // notice above), from whatever is open at that time. The old dropdown
+                          // offered "the next cohort", which is how deferrals ended up counted as
+                          // fresh activity in a cycle they were never recruited for.
+                          const { isConfirmed } = await Swal.fire({
+                            title: 'Pause your application?',
+                            html: `<p style="color: #555;">Your application will be paused and you'll be taken out of your current cohort.</p>
+                                   <p style="color: #555; margin-top: 10px;">You can reinstate it whenever you're ready, and pick which cohort to be considered for then.</p>`,
+                            icon: 'question',
                             showCancelButton: true,
-                            confirmButtonText: 'Defer My Enrollment',
-                            cancelButtonText: 'Cancel',
+                            confirmButtonText: 'Pause My Application',
+                            cancelButtonText: 'Never mind',
                             confirmButtonColor: '#4242ea',
-                            cancelButtonColor: '#6c757d',
-                            inputValidator: (value) => !value && 'Please select a cohort'
+                            cancelButtonColor: '#6c757d'
                           });
 
-                          if (!isConfirmed || !chosenCohortId) return;
+                          if (!isConfirmed) return;
 
                           try {
                             const token = localStorage.getItem('applicantToken');
@@ -1207,19 +1243,18 @@ function ApplicantDashboard() {
                               headers: {
                                 'Content-Type': 'application/json',
                                 'Authorization': `Bearer ${token}`
-                              },
-                              body: JSON.stringify({ cohortId: chosenCohortId })
+                              }
                             });
 
                             if (!response.ok) {
                               const error = await response.json();
-                              throw new Error(error.error || 'Failed to defer application');
+                              throw new Error(error.error || 'Failed to pause application');
                             }
 
                             const deferResult = await response.json();
                             await Swal.fire({
                               icon: 'success',
-                              title: 'Enrollment Deferred',
+                              title: 'Application Paused',
                               text: deferResult.message,
                               confirmButtonColor: '#4242ea'
                             });
@@ -1228,14 +1263,14 @@ function ApplicantDashboard() {
                             await Swal.fire({
                               icon: 'error',
                               title: 'Error',
-                              text: error.message || 'Failed to defer application.',
+                              text: error.message || 'Failed to pause application.',
                               confirmButtonColor: '#dc3545'
                             });
                           }
                         }}
                         className="w-full text-sm text-red-600 border border-red-300 rounded-xl py-2 px-4 hover:bg-red-50 transition-colors"
                       >
-                        Change of plans? Defer enrollment to a later cohort
+                        Not ready for this cohort? Pause my application
                       </button>
                     )}
 

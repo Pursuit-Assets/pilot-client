@@ -31,7 +31,10 @@ const classifyBuilder = (b) => {
 };
 
 const pct = (n, d) => (d ? Math.round((100 * n) / d) : 0);
-const fmtLevel = (l) => (l == null ? '—' : `L${Number(l).toFixed(2)}`);
+// A MEAN across a builder's skills, so it stays numeric — an average of 3.2 is
+// not a Dreyfus stage and can't be named. The `L` prefix was dropped with the
+// rest of the Coach surfaces (2026-08-03).
+const fmtLevel = (l) => (l == null ? '—' : Number(l).toFixed(2));
 
 const DEFAULT_COHORT_NAME = 'L1 - July 2026';
 
@@ -267,7 +270,7 @@ const CohortInsights = ({ embedded = false, onViewSnapshot = null }) => {
                     <CartesianGrid stroke="#EEE" />
                     <XAxis
                       type="number" dataKey="avg_level" domain={[0, 5]} ticks={[0, 1, 2, 3, 4, 5]}
-                      tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `L${v}`}
+                      tick={{ fontSize: 11, fill: '#94a3b8' }}
                       label={{ value: 'Average skill level (Dreyfus 0–5)', position: 'bottom', offset: 12, fontSize: 12, fill: '#64748b' }}
                     />
                     <YAxis

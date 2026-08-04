@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import useAuthStore from '../../../stores/authStore';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../../../components/ui/sheet';
 import { listLabPresets, classifyTeachingMethod, coachTurn, generateChallenge } from '../../../services/onboardingLabApi';
+import { DREYFUS_LABELS, levelLabel as dreyfusLevelLabel } from '../coachDreyfus';
 
 const BRAND = '#4242EA';
 
@@ -62,7 +63,6 @@ const STYLE_OPTIONS = ['socratic', 'direct', 'example_based', 'inquiry_based', '
 // task's skills, targeting one stage above it. These are the levels you can
 // emulate; `null` is an unassessed (brand-new) builder.
 // ---------------------------------------------------------------------------
-const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
 const DEFAULT_LEVEL_OPTIONS = [
   ...DREYFUS_LABELS.map((label, level) => ({ level, label })),
   { level: null, label: 'Unassessed (new builder)' },
@@ -71,8 +71,11 @@ const DEFAULT_LEVEL_OPTIONS = [
 // Darker = more advanced, so a row of columns reads as a ramp.
 const LEVEL_TONE = ['slate', 'slate', 'teal', 'blue', 'indigo', 'violet'];
 const levelTone = (lvl) => (Number.isInteger(lvl) ? LEVEL_TONE[lvl] : 'amber');
-const levelLabel = (lvl) =>
-  Number.isInteger(lvl) ? `L${lvl} ${DREYFUS_LABELS[lvl]}` : 'Unassessed';
+
+// Delegates to the shared formatter so the labels can't drift; only the
+// no-level wording is local — this page emulates an "Unassessed" builder as a
+// deliberate option, which reads better than the shared "N/A".
+const levelLabel = (lvl) => (Number.isInteger(lvl) ? dreyfusLevelLabel(lvl) : 'Unassessed');
 
 // Object keys can't be null, so level columns are keyed by a stable string.
 const levelKey = (lvl) => (Number.isInteger(lvl) ? `L${lvl}` : 'Lna');
@@ -97,15 +100,17 @@ const LEVEL_DESCRIPTIONS = {
  */
 const DecisionChips = ({ decision }) => {
   if (!decision) return null;
-  const { currentLevel, currentLabel, targetLevel, targetLabel, levelSource } = decision;
+  // Stage names come from the shared formatter, not the server's currentLabel /
+  // targetLabel, so this can't drift from the rest of the Coach surfaces.
+  const { currentLevel, targetLevel, levelSource } = decision;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <Chip tone={levelTone(currentLevel)}>
-        {Number.isInteger(currentLevel) ? `now L${currentLevel} ${currentLabel}` : 'now — unassessed'}
+        {Number.isInteger(currentLevel) ? `now ${dreyfusLevelLabel(currentLevel)}` : 'now — unassessed'}
       </Chip>
       <span className="text-slate-400 text-xs">→</span>
       <Chip tone={levelTone(targetLevel)}>
-        {Number.isInteger(targetLevel) ? `targets L${targetLevel} ${targetLabel}` : 'targets —'}
+        {Number.isInteger(targetLevel) ? `targets ${dreyfusLevelLabel(targetLevel)}` : 'targets —'}
       </Chip>
       {levelSource === 'unassessed' && (
         <span
@@ -302,13 +307,18 @@ const ChallengePanel = ({ token, method, level, messages }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // The challenge follows the conversation, so a stale one would misrepresent
-  // the pairing. Clear it whenever the axis or the transcript changes.
+  // Clear on an AXIS change only (teaching method / skill level) — those change
+  // what the challenge would be, so a stale one misrepresents the pairing.
+  //
+  // Deliberately NOT keyed on messages.length: every builder reply and coach turn
+  // increments it, so that wiped a generated challenge the instant the user asked
+  // a follow-up question. Continuing the lesson doesn't invalidate a challenge
+  // built from it — and the user can always regenerate to pick up later turns.
   useEffect(() => {
     setChallenge(null);
     setDecision(null);
     setError(null);
-  }, [method, level, messages.length]);
+  }, [method, level]);
 
   const run = async () => {
     setLoading(true);
@@ -501,8 +511,11 @@ const StyleChip = ({ style }) => (
   </span>
 );
 
-// A level chip with a hover tooltip describing that Dreyfus stage.
-const LevelChip = ({ level }) => (
+// A stage chip with a hover tooltip describing that Dreyfus stage. Deliberately
+// NOT coachDreyfus's LevelChip: this one carries LEVEL_DESCRIPTIONS on hover and
+// uses this page's darker-is-more-advanced tone ramp, so the compare columns read
+// as a gradient. Renamed off "LevelChip" so the two can't be confused.
+const LevelStageChip = ({ level }) => (
   <span className="relative group inline-block">
     <Chip tone={levelTone(level)}>{levelLabel(level)}</Chip>
     {LEVEL_DESCRIPTIONS[level] && (
@@ -637,7 +650,7 @@ const CompareView = ({ token, axis, levelOptions }) => {
   }, [busy, started]);
 
   const ColumnChip = ({ columnKey }) =>
-    isLevelAxis ? <LevelChip level={levelFromKey(columnKey)} /> : <StyleChip style={columnKey} />;
+    isLevelAxis ? <LevelStageChip level={levelFromKey(columnKey)} /> : <StyleChip style={columnKey} />;
 
   const columnLabel = (key) => (isLevelAxis ? levelLabel(levelFromKey(key)) : methodLabel(key));
   const columnTone = (key) => (isLevelAxis ? levelTone(levelFromKey(key)) : methodTone(key));
@@ -1028,7 +1041,7 @@ const TeachingLab = () => {
             <SheetTitle className="flex items-center gap-2 flex-wrap text-base">
               Coach in action
               {result && <Chip tone={methodTone(result.effectiveMethod)}>{methodLabel(result.effectiveMethod)}</Chip>}
-              <LevelChip level={demoLevel} />
+              <LevelStageChip level={demoLevel} />
             </SheetTitle>
             <SheetDescription className="text-xs">
               The real coach learn phase, run live in this teaching method for a builder at this
