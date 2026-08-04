@@ -15,6 +15,13 @@ vi.mock('react-router-dom', async () => {
 });
 
 // Mock child components to isolate Dashboard testing
+// CoachCard fetches /coach-card on mount — unmocked it would consume the
+// sequential fetch-mock responses these tests queue for the dashboard's own
+// requests. It has its own tests; stub it here.
+vi.mock('../../Learning/components/onboarding/CoachCard', () => ({
+  default: () => null,
+}));
+
 vi.mock('../../../components/MissedAssignmentsSidebar/MissedAssignmentsSidebar', () => ({
   default: ({ isOpen, onClose }) => (
     isOpen ? <div data-testid="missed-assignments-sidebar">Sidebar</div> : null
