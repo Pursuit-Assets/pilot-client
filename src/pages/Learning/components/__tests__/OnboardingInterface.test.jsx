@@ -22,6 +22,8 @@ vi.mock('../../../../services/onboardingApi', () => ({
   completeSession: vi.fn(),
   abandonSession: vi.fn(),
   streamChat: vi.fn(),
+  getCoachCard: vi.fn(),
+  correctCoachCard: vi.fn(),
 }));
 
 // sonner toast — keep silent; the Finish handler shows a toast on failure.
@@ -265,5 +267,123 @@ describe('OnboardingInterface', () => {
       await Promise.resolve();
     });
     expect(abandonSession).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Redesign ("Meet Your Coach" v2) — server-signal-driven UI. Everything below
+// is inert unless /start returns redesign:true or the stream emits control
+// events, so the legacy tests above double as the knob-off regression suite.
+// ---------------------------------------------------------------------------
+describe('OnboardingInterface — redesign', () => {
+  const REDESIGN_START = {
+    sessionId: 'sess-1',
+    resumed: false,
+    redesign: true,
+    stage: 'meet',
+    stylePick: null,
+    buildCard: { whatYouBuilt: 'A resume tailor that rewrites bullets per posting', artifactUrl: null },
+  };
+
+  it('renders the BuildCard and StageDots from the /start payload', async () => {
+    startSession.mockResolvedValue(REDESIGN_START);
+    await renderOnboarding();
+    expect(screen.getByText(/your workshop build/i)).toBeInTheDocument();
+    expect(screen.getByText(/resume tailor/i)).toBeInTheDocument();
+    // Labeled dots
+    expect(screen.getByText('Your Build')).toBeInTheDocument();
+    expect(screen.getByText('How You Learn')).toBeInTheDocument();
+    // No artifact link — url was null (unvalidated links never render)
+    expect(screen.queryByText(/view your build/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the artifact link ONLY when the server validated one', async () => {
+    startSession.mockResolvedValue({
+      ...REDESIGN_START,
+      buildCard: { whatYouBuilt: 'A flashcard site', artifactUrl: 'https://example.com/app' },
+    });
+    await renderOnboarding();
+    const link = screen.getByRole('link', { name: /view your build/i });
+    expect(link).toHaveAttribute('href', 'https://example.com/app');
+  });
+
+  it('legacy start payload renders NO redesign chrome', async () => {
+    startSession.mockResolvedValue({ sessionId: 'sess-1', resumed: false, buildReviewReady: true });
+    await renderOnboarding();
+    expect(screen.queryByText(/your workshop build/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Your Build')).not.toBeInTheDocument();
+  });
+
+  it('style_choices event renders the 4 tap cards; a tap sends the structured pick and collapses to a chip', async () => {
+    startSession.mockResolvedValue(REDESIGN_START);
+    // Opening stream: coach_message beats + the style_choices control event.
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onCoachMessage, onStage, onStyleChoices, onDone }) => {
+      onText?.({ content: 'Let me show you the same idea four ways.' });
+      onCoachMessage?.({ content: '**Tell me** — plain explanation beat' });
+      onCoachMessage?.({ content: '**Show me** — worked example beat' });
+      onStage?.({ value: 'learn' });
+      onStyleChoices?.({
+        options: [
+          { family: 'tell_me', label: 'Tell me', description: 'Explain it plainly' },
+          { family: 'show_me', label: 'Show me', description: 'Worked example first' },
+          { family: 'ask_me', label: 'Ask me', description: 'Questions first' },
+          { family: 'let_me_try', label: 'Let me try', description: 'Real problem first' },
+        ],
+      });
+      onDone?.({ sequenceNumber: 5 });
+    });
+    await renderOnboarding();
+
+    // Beats arrived as complete bubbles.
+    expect(screen.getByText(/plain explanation beat/)).toBeInTheDocument();
+    expect(screen.getByText(/worked example beat/)).toBeInTheDocument();
+    // Cards rendered.
+    const showMe = screen.getByRole('button', { name: /show me/i });
+    expect(screen.getByRole('button', { name: /tell me/i })).toBeInTheDocument();
+
+    // Tap → second streamChat call with empty message + structured meta.
+    streamChat.mockClear();
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onDone }) => {
+      onText?.({ content: 'Worked examples it is — want to try one?' });
+      onDone?.({ sequenceNumber: 7 });
+    });
+    await act(async () => {
+      fireEvent.click(showMe);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(streamChat).toHaveBeenCalledTimes(1);
+    expect(streamChat.mock.calls[0][2]).toBe('');
+    expect(streamChat.mock.calls[0][3].meta).toEqual({ style_pick: 'show_me' });
+
+    // Cards collapsed to the confirmation chip; tap buttons gone.
+    expect(screen.queryByRole('button', { name: /tell me/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/show me — worked example first/i)).toBeInTheDocument();
+  });
+
+  it('resume with beats delivered but no pick re-renders the tap cards (fallback options)', async () => {
+    startSession.mockResolvedValue({ ...REDESIGN_START, resumed: true, stage: 'learn' });
+    getSession.mockResolvedValue({
+      session: { stage: 'learn', style_pick: null, beats_delivered_at: '2026-08-04T00:00:00Z' },
+      messages: [
+        { role: 'coach', content: 'Earlier beats…' },
+        { role: 'builder', content: 'ok' },
+      ],
+    });
+    await renderOnboarding();
+    // Cards render from DEFAULT_OPTIONS without any stream event.
+    expect(screen.getByRole('button', { name: /let me try/i })).toBeInTheDocument();
+    // And no opening call was made (prior turns exist) — streamChat untouched.
+    expect(streamChat).not.toHaveBeenCalled();
+  });
+
+  it('resume with a recorded pick shows the chip, not the cards', async () => {
+    startSession.mockResolvedValue({ ...REDESIGN_START, resumed: true, stage: 'ahead', stylePick: 'ask_me' });
+    getSession.mockResolvedValue({
+      session: { stage: 'ahead', style_pick: 'ask_me', beats_delivered_at: '2026-08-04T00:00:00Z' },
+      messages: [{ role: 'coach', content: 'Earlier…' }, { role: 'builder', content: 'hi' }],
+    });
+    await renderOnboarding();
+    expect(screen.queryByRole('button', { name: /tell me/i })).not.toBeInTheDocument();
   });
 });

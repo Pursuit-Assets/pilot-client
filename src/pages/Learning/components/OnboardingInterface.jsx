@@ -182,11 +182,13 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
           onCoachMessage: ({ content }) => {
             // A COMPLETE coach bubble (the authored taste-test beats). The
             // streaming intro bubble already exists above; beats append after.
+            // Capture id/seq NOW — the setMessages updater runs later, and two
+            // synchronous beat frames would otherwise read the same final
+            // seqRef value and collide on React keys.
             seqRef.current += 1;
-            setMessages((prev) => [
-              ...prev,
-              { id: `cm-${seqRef.current}`, role: 'coach', content, seq: seqRef.current },
-            ]);
+            const id = `cm-${seqRef.current}`;
+            const seq = seqRef.current;
+            setMessages((prev) => [...prev, { id, role: 'coach', content, seq }]);
           },
           onStage: ({ value }) => {
             setRedesign(true);
