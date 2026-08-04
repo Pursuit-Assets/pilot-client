@@ -5,16 +5,25 @@ import {
 } from '../coachDreyfus';
 
 describe('coachDreyfus helpers', () => {
-  it('levelLabel renders Dreyfus labels and N/A', () => {
-    expect(levelLabel(4)).toBe('L4 Proficient');
-    expect(levelLabel(0)).toBe('L0 Below Novice');
+  // The L-number was dropped from every Coach surface (2026-08-03) — staff read
+  // the stage name, and the digit implied a score the Dreyfus scale doesn't carry.
+  it('levelLabel renders the bare Dreyfus stage name, not an L-number', () => {
+    expect(levelLabel(4)).toBe('Proficient');
+    expect(levelLabel(0)).toBe('Below Novice');
     expect(levelLabel(null)).toBe('N/A');
+    expect(levelLabel(undefined)).toBe('N/A');
+  });
+
+  // An off-scale level must stay VISIBLE rather than render as an empty chip —
+  // the previous implementation surfaced it as a bare "L6".
+  it('levelLabel falls back to "Level <n>" for a level outside the scale', () => {
+    expect(levelLabel(6)).toBe('Level 6');
   });
 
   it('vsPriorLabel describes movement vs the prior level', () => {
-    expect(vsPriorLabel({ level: 3, prior: 2 })).toBe('↑ improved from L2');
-    expect(vsPriorLabel({ level: 3, prior: 3 })).toBe('held L3');
-    expect(vsPriorLabel({ level: 2, prior: 4 })).toBe('↓ below prior L4');
+    expect(vsPriorLabel({ level: 3, prior: 2 })).toBe('↑ improved from Advanced Beginner');
+    expect(vsPriorLabel({ level: 3, prior: 3 })).toBe('held Competent');
+    expect(vsPriorLabel({ level: 2, prior: 4 })).toBe('↓ below prior Proficient');
     expect(vsPriorLabel({ level: 3 })).toBe('new skill'); // no prior
     expect(vsPriorLabel({ level: null })).toBeNull();
   });
@@ -40,8 +49,8 @@ describe('SkillAssessmentTable', () => {
       { skill_slug: 'write-structure-prompts', level: 4, prior: 3, rationale: 'clear strategy', evidence: 'iterated' },
     ]} />);
     expect(screen.getByText('write structure prompts')).toBeInTheDocument();
-    expect(screen.getByText('L4 Proficient')).toBeInTheDocument();
-    expect(screen.getByText('↑ improved from L3')).toBeInTheDocument();
+    expect(screen.getByText('Proficient')).toBeInTheDocument();
+    expect(screen.getByText('↑ improved from Competent')).toBeInTheDocument();
     expect(screen.getByText('clear strategy')).toBeInTheDocument();
     expect(screen.getByText('iterated')).toBeInTheDocument();
   });

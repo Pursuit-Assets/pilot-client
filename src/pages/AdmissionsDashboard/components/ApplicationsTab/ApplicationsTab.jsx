@@ -29,6 +29,7 @@ import {
 } from '../../../../components/ui/dialog';
 import { formatPhoneNumber, getStatusBadgeClasses, formatStatus, getColumnLabel } from '../shared/utils';
 import { Input } from '../../../../components/ui/input';
+import Swal from 'sweetalert2';
 
 // Filter options for each column
 const filterOptions = {
@@ -763,6 +764,20 @@ const ApplicationsTab = ({
 
   const handleMoveSelectedToCohort = useCallback(async () => {
     if (selectedApplicants.length === 0 || !targetCohortId) return;
+
+    // A bulk move is how 13 already-decided applicants landed in the actively-recruiting cohort
+    // on 2026-07-07 with nothing recorded about who or why. Every move is now audited, and the
+    // server refuses to move an applicant whose admission decision is final without a reason.
+    const { value: reason, isConfirmed } = await Swal.fire({
+      title: `Move ${selectedApplicants.length} applicant${selectedApplicants.length === 1 ? '' : 's'} to ${cohortNameMap[targetCohortId] || 'this cohort'}?`,
+      input: 'text',
+      inputLabel: 'Reason for the move (recorded in the audit trail)',
+      inputPlaceholder: 'e.g. applied to the wrong cycle by mistake',
+      showCancelButton: true,
+      confirmButtonText: 'Move applicants'
+    });
+    if (!isConfirmed) return;
+
     setMovingCohort(true);
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/admissions/bulk-actions`, {
@@ -774,7 +789,8 @@ const ApplicationsTab = ({
         body: JSON.stringify({
           action: 'move_to_cohort',
           applicant_ids: selectedApplicants,
-          cohort_id: targetCohortId
+          cohort_id: targetCohortId,
+          notes: (reason || '').trim() || null
         })
       });
 
@@ -783,16 +799,34 @@ const ApplicationsTab = ({
         throw new Error(data.error || 'Failed to move selected applicants');
       }
 
+      // The endpoint answers 200 even when individual applicants were refused (deferred, or a
+      // final decision with no reason). Those per-row results used to be dropped on the floor,
+      // so a partly-refused bulk move looked like a clean success.
+      const data = await response.json().catch(() => ({}));
+      const updates = data?.results?.cohort_updates || [];
+      const failed = updates.filter((u) => !u.success);
+      const moved = updates.length - failed.length;
+
       await fetchApplications();
       setSelectedApplicants([]);
       setTargetCohortId('');
+
+      if (failed.length > 0) {
+        Swal.fire({
+          icon: moved > 0 ? 'warning' : 'error',
+          title: moved > 0 ? `Moved ${moved}, skipped ${failed.length}` : 'No applicants were moved',
+          html: `<div style="text-align:left;font-size:0.85rem;max-height:16rem;overflow-y:auto">${
+            failed.map((f) => `<div style="margin-bottom:.5rem"><strong>Applicant ${f.applicant_id}</strong><br/>${f.error}</div>`).join('')
+          }</div>`
+        });
+      }
     } catch (error) {
       console.error('Error moving selected applicants to cohort:', error);
       alert(error.message || 'Failed to move selected applicants');
     } finally {
       setMovingCohort(false);
     }
-  }, [selectedApplicants, targetCohortId, token, fetchApplications, setSelectedApplicants]);
+  }, [selectedApplicants, targetCohortId, token, fetchApplications, setSelectedApplicants, cohortNameMap]);
   
   // Handle navigating to applicant detail
   const handleViewApplication = useCallback((applicantId) => {

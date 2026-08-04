@@ -12,16 +12,28 @@
 
 export const DREYFUS_LABELS = ['Below Novice', 'Novice', 'Advanced Beginner', 'Competent', 'Proficient', 'Expert'];
 
-export const levelLabel = (level) =>
-  Number.isInteger(level) ? `L${level} ${DREYFUS_LABELS[level] || ''}`.trim() : 'N/A';
+/**
+ * A Dreyfus stage as its NAME only — "Proficient", not "L4 Proficient".
+ * The L-number was dropped from every Coach surface (2026-08-03): staff read the
+ * stage name, and the digit added nothing while implying a score.
+ *
+ * An out-of-range level falls back to `Level <n>` rather than rendering empty —
+ * the old implementation trimmed to a bare "L6", so a grader emitting a level
+ * beyond the scale stayed visible. Keep it visible.
+ */
+export const levelLabel = (level) => {
+  if (!Number.isInteger(level)) return 'N/A';
+  return DREYFUS_LABELS[level] || `Level ${level}`;
+};
 
-/** "improved from L2" / "held L3" / "below prior L4" / "new skill" (needs a.prior from the engine). */
+/** "improved from Novice" / "held Competent" / "below prior Proficient" / "new skill". */
 export const vsPriorLabel = (a) => {
   if (!Number.isInteger(a.level)) return null;
   if (!Number.isInteger(a.prior)) return 'new skill';
-  if (a.level > a.prior) return `↑ improved from L${a.prior}`;
-  if (a.level === a.prior) return `held L${a.prior}`;
-  return `↓ below prior L${a.prior}`;
+  const prior = levelLabel(a.prior);
+  if (a.level > a.prior) return `↑ improved from ${prior}`;
+  if (a.level === a.prior) return `held ${prior}`;
+  return `↓ below prior ${prior}`;
 };
 
 /** Why the run passed/failed, from the window-relative rule. Null when the run

@@ -11,6 +11,7 @@ import {
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 const fmt$ = (n) => n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+const fmt$Precise = (n) => n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 const fmtPct = (n) => n == null ? '—' : `${n}%`;
 const toInputDate = (d) => d.toISOString().slice(0, 10);
 
@@ -78,6 +79,36 @@ function formatEtaLabel(monthsRemaining) {
 // Curated V1: no one is currently on pause — ignore Sheet-driven list.
 const CURATED_PAUSE_WATCHLIST = [];
 
+// Curated weekly highlights for Executive Summary (ops narrative; not API-driven).
+const WEEKLY_HIGHLIGHTS = {
+  headline: 'Rajiv Sukhnandan has agreed to pay via Direct Deposit.',
+  methodsIntro:
+    'To improve long-term payment compliance, we recently introduced two new repayment methods that move payments closer to the source of income.',
+  methods: [
+    {
+      title: 'Pursuit-Managed Payments',
+      body: 'For Builders paid through Pursuit PBC, Good Job Agreement payments are withheld during the payment process and routed directly to Pursuit.org.',
+      ytdEnrolled: 4,
+    },
+    {
+      title: 'Direct Deposit',
+      body: 'For Fellows and Builders not paid through Pursuit PBC, direct deposit is now the preferred repayment method, providing a simpler, Builder-controlled payment experience.',
+      ytdEnrolled: 2,
+    },
+  ],
+  pursuitManagedActive: [
+    { name: 'Ariel Chen', detail: '$1,297.20 in July' },
+    { name: 'Kelvin Saldana', detail: '$1,297.20 in July' },
+    { name: 'Jacob Williams', detail: '$350/mo payment plan' },
+  ],
+  augustPipeline: [
+    { name: 'Kalila Green', amount: 1093.75, method: 'Direct Deposit', notes: 'New job — direct deposit set up; begin August 2026' },
+    { name: 'Ethan Davey', amount: 1062.5, method: 'Pursuit Managed', notes: 'New job — Pursuit managed; begin August 2026' },
+    { name: 'Daniel Chillemi', amount: 350, method: 'Pursuit Managed', notes: 'Payment plan: $350/mo × 6 months, then $1,800/mo × 6 months to catch up; begin August 2026' },
+    { name: 'Rajiv Sukhnandan', amount: 1100, method: 'Direct Deposit', notes: 'New job — direct deposit set up; begin August 2026' },
+  ],
+};
+
 // ─── Preset ranges ────────────────────────────────────────────────────────────
 function getPresetRange(preset) {
   const now = new Date();
@@ -95,6 +126,7 @@ function getPresetRange(preset) {
       const dow = now.getDay();
       return { start: ymd(y, m, d - dow - 7), end: ymd(y, m, d - dow - 1) };
     }
+    case 'last7':       return { start: ymd(y, m, d - 6), end: ymd(y, m, d) };
     case 'mtd':         return { start: ymd(y, m, 1),   end: ymd(y, m, d) };
     case 'lastMonth':   return { start: ymd(y, m-1, 1), end: ymd(y, m, 0) };
     case 'qtd': {
@@ -446,6 +478,8 @@ const MetricsDashboard = () => {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Always-on Past Week snapshot for Executive Summary (independent of filter presets)
+  const [weekSnap, setWeekSnap] = useState(null);
 
   // Compliance Lists (Not Compliant / At Risk / Compliant) state
   const [ncMonth, setNcMonth] = useState(() => {
@@ -455,25 +489,49 @@ const MetricsDashboard = () => {
   const [ncData, setNcData] = useState(null);
   const [ncLoading, setNcLoading] = useState(false);
 
+  const fetchMetricsRange = useCallback(async (range) => {
+    const params = new URLSearchParams({ startDate: range.start, endDate: range.end });
+    if (selectedCohorts.length > 0) params.set('cohort', selectedCohorts.join(','));
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/payment/admin/metrics?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error('Failed to load metrics');
+    return res.json();
+  }, [selectedCohorts, token]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams({ startDate, endDate });
-      if (selectedCohorts.length > 0) params.set('cohort', selectedCohorts.join(','));
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/payment/admin/metrics?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to load metrics');
-      setMetrics(await res.json());
+      setMetrics(await fetchMetricsRange({ start: startDate, end: endDate }));
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, selectedCohorts, token]);
+  }, [startDate, endDate, fetchMetricsRange]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Always load rolling last-7 for the Executive Summary past-week card
+  useEffect(() => {
+    let cancelled = false;
+    const weekRange = getPresetRange('last7');
+    fetchMetricsRange(weekRange)
+      .then((weekData) => {
+        if (cancelled) return;
+        setWeekSnap({
+          total: weekData.totalCollections,
+          prior: weekData.priorCollections,
+          start: weekRange.start,
+          end: weekRange.end,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setWeekSnap(null);
+      });
+    return () => { cancelled = true; };
+  }, [fetchMetricsRange]);
 
   // Fetch compliance lists on mount + whenever month changes (powers tab badge too)
   useEffect(() => {
@@ -510,6 +568,10 @@ const MetricsDashboard = () => {
   const generatedAt = metrics?.generatedAt
     ? new Date(metrics.generatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
     : null;
+
+  const selectedPeriodLabel = activePreset
+    ? (PRESETS.find((p) => p.key === activePreset)?.label || 'Selected Period')
+    : 'Custom Range';
 
   return (
     <div className="bg-gray-50 min-h-screen">
@@ -590,20 +652,108 @@ const MetricsDashboard = () => {
             {activeTab === 'executive' && (
               <div className="space-y-4">
 
-                {/* Hero: Total Collections */}
-                <div className="bg-gradient-to-r from-[#4242EA] to-[#8b5cf6] rounded-2xl p-6 text-white">
-                  <p className="text-sm font-medium text-white/70 uppercase tracking-wide mb-1">Total Collections</p>
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <p className="text-5xl font-bold">{fmt$(metrics.totalCollections)}</p>
-                    <DeltaBadge current={metrics.totalCollections} prior={metrics.priorCollections} />
+                {/* Hero: selected-period + Past-week collections */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-gradient-to-r from-[#4242EA] to-[#8b5cf6] rounded-2xl p-6 text-white">
+                    <p className="text-sm font-medium text-white/70 uppercase tracking-wide mb-1">
+                      {selectedPeriodLabel} Collections
+                    </p>
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <p className="text-4xl font-bold">{fmt$(metrics.totalCollections)}</p>
+                      <DeltaBadge current={metrics.totalCollections} prior={metrics.priorCollections} />
+                    </div>
+                    <p className="text-sm text-white/60 mt-2">
+                      {startDate} — {endDate}
+                      {selectedCohorts.length > 0 && ` · Cohort ${selectedCohorts.join(', ')}`}
+                      {metrics.priorCollections != null && (
+                        <span className="ml-2">· Prior period: {fmt$(metrics.priorCollections)}</span>
+                      )}
+                    </p>
                   </div>
-                  <p className="text-sm text-white/60 mt-2">
-                    {startDate} — {endDate}
-                    {selectedCohorts.length > 0 && ` · Cohort ${selectedCohorts.join(', ')}`}
-                    {metrics.priorCollections != null && (
-                      <span className="ml-2">· Prior period: {fmt$(metrics.priorCollections)}</span>
-                    )}
-                  </p>
+                  <div className="bg-gradient-to-r from-[#1e1b4b] to-[#4242EA] rounded-2xl p-6 text-white">
+                    <p className="text-sm font-medium text-white/70 uppercase tracking-wide mb-1">Past Week Collections</p>
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <p className="text-4xl font-bold">{fmt$(weekSnap?.total)}</p>
+                      <DeltaBadge current={weekSnap?.total} prior={weekSnap?.prior} />
+                    </div>
+                    <p className="text-sm text-white/60 mt-2">
+                      {weekSnap
+                        ? `${weekSnap.start} — ${weekSnap.end} · rolling last 7 days`
+                        : 'Rolling last 7 days'}
+                      {weekSnap?.prior != null && (
+                        <span className="ml-2">· Prior 7 days: {fmt$(weekSnap.prior)}</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Last-week highlights */}
+                <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide">Highlights — Last Week</h3>
+                    <p className="text-sm text-gray-700 mt-2">{WEEKLY_HIGHLIGHTS.headline}</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-800 mb-1">Payment Operations</h4>
+                    <p className="text-sm text-gray-600 mb-3">{WEEKLY_HIGHLIGHTS.methodsIntro}</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {WEEKLY_HIGHLIGHTS.methods.map((method) => (
+                        <div key={method.title} className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                          <p className="text-sm font-semibold text-gray-900">{method.title}</p>
+                          <p className="text-sm text-gray-600 mt-1">{method.body}</p>
+                          <p className="text-xs font-medium text-[#4242EA] mt-2">YTD: {method.ytdEnrolled} Builders enrolled.</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Pursuit-Managed (active)</h4>
+                    <ul className="text-sm text-gray-700 space-y-1">
+                      {WEEKLY_HIGHLIGHTS.pursuitManagedActive.map((row) => (
+                        <li key={row.name}>
+                          <span className="font-medium text-gray-900">{row.name}</span>
+                          <span className="text-gray-500"> — {row.detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                      <h4 className="text-sm font-semibold text-gray-800">Start invoicing in August</h4>
+                      <p className="text-xs text-gray-500">
+                        Pipeline total:{' '}
+                        <span className="font-semibold text-gray-800">
+                          {fmt$Precise(WEEKLY_HIGHLIGHTS.augustPipeline.reduce((s, r) => s + (r.amount || 0), 0))}
+                        </span>
+                        /mo
+                      </p>
+                    </div>
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                          <tr>
+                            <th className="text-left font-medium px-3 py-2">Name</th>
+                            <th className="text-right font-medium px-3 py-2">Monthly Amount</th>
+                            <th className="text-left font-medium px-3 py-2">Payment Method</th>
+                            <th className="text-left font-medium px-3 py-2">Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {WEEKLY_HIGHLIGHTS.augustPipeline.map((row) => (
+                            <tr key={row.name} className="border-t border-gray-100">
+                              <td className="px-3 py-2 font-medium text-gray-900">{row.name}</td>
+                              <td className="px-3 py-2 text-right text-gray-800">{fmt$Precise(row.amount)}</td>
+                              <td className="px-3 py-2 text-gray-700">{row.method}</td>
+                              <td className="px-3 py-2 text-gray-500">{row.notes}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
 
                 {/* KPI cards */}

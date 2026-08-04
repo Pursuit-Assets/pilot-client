@@ -15,10 +15,20 @@ import { BookOpen, Target, Brain } from 'lucide-react';
  *     learning_modality_preferences.preferred
  */
 
+// The teaching-method enum is SIX-wide (server: queries/builderProfiles.js
+// VALID_TEACHING_METHODS). This map had only three entries, so the other three
+// fell through to the raw slug — Dennys Antunish's card read "Prefers
+// experiential" in lowercase. `demonstration` is a retired value merged into
+// example_based (2026-06-22) but is still stored on older profiles, so it is
+// aliased here the way the server aliases it at read time.
 const TEACHING_METHOD_LABEL = {
   socratic: 'Socratic',
   direct: 'Direct',
   example_based: 'Example-Based',
+  inquiry_based: 'Inquiry-Based',
+  problem_based: 'Problem-Based',
+  experiential: 'Experiential',
+  demonstration: 'Example-Based', // legacy alias
 };
 
 const StoryCard = ({ icon: Icon, title, accent, accentBg, children, empty }) => (

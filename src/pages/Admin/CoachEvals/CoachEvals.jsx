@@ -299,15 +299,28 @@ const snapshotSummary = (snap) => {
 const BatchCompare = ({ token, batchIds }) => {
   const [a, setA] = useState(null);
   const [b, setB] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let live = true;
-    setA(null); setB(null);
+    setA(null); setB(null); setError(null);
     Promise.all(batchIds.map((id) => getBatch(token, id)))
       .then(([ra, rb]) => { if (live) { setA(ra); setB(rb); } })
-      .catch(() => { /* leave loading */ });
+      .catch((e) => { if (live) setError(e.message || 'Failed to load one or both batches'); });
     return () => { live = false; };
   }, [token, batchIds]);
+
+  // Must precede the loading branch: on failure a/b stay null, so checking
+  // !a || !b first would pin the pane on "Loading comparison…" forever.
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded px-3 py-2">
+          Couldn&apos;t load the comparison: {error}
+        </div>
+      </div>
+    );
+  }
 
   if (!a || !b) return <div className="p-6 text-slate-400 text-sm">Loading comparison…</div>;
 
