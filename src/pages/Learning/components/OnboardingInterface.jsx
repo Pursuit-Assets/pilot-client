@@ -15,9 +15,17 @@ import TaskCompletionBar from '../../../components/TaskCompletionBar/TaskComplet
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import BuildCard from './onboarding/BuildCard';
-import StageDots from './onboarding/StageDots';
+import StageDots, { stageLabel, normalizeStage } from './onboarding/StageDots';
 import StyleChoiceCards from './onboarding/StyleChoiceCards';
 import CoachCard from './onboarding/CoachCard';
+
+// Resume hydration: a persisted tap turn reads '[Builder tapped: Show me — …]'
+// (self-describing for LLM history replay) — display it like the sent message
+// it represents.
+const displayTurnContent = (content) => {
+  const m = typeof content === 'string' && content.match(/^\[Builder tapped: (.+)\]$/);
+  return m ? m[1] : content;
+};
 
 // ---------------------------------------------------------------------------
 // Streaming markdown bubble — coach turns animate as text arrives via SSE.
@@ -69,11 +77,14 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
   const [error, setError] = useState('');
   // ---- Redesign state (server-driven; all inert when the knob is off) ----
   const [redesign, setRedesign] = useState(false);
-  const [stage, setStage] = useState('meet');           // server-stamped via SSE `stage` events
+  const [stage, setStage] = useState('story');          // server-stamped via SSE `stage` events
   const [buildCard, setBuildCard] = useState(null);     // { whatYouBuilt, artifactUrl } from /start
-  const [styleOptions, setStyleOptions] = useState(null); // server payload from `style_choices`
-  const [showStyleCards, setShowStyleCards] = useState(false);
   const [stylePicked, setStylePicked] = useState(null); // family key
+  // Ref-mirror of stage so SSE handlers (closures) can compare against the
+  // CURRENT stage — the server re-emits `stage` every turn; a transcript
+  // divider must only append on an actual transition.
+  const stageRef = useRef('story');
+  const setStageBoth = (value) => { stageRef.current = value; setStage(value); };
   const startTimeRef = useRef(Date.now());
   const completedRef = useRef(false);
   // Synchronous in-flight guard for handleComplete. A bare useState would
@@ -190,13 +201,40 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
             const seq = seqRef.current;
             setMessages((prev) => [...prev, { id, role: 'coach', content, seq }]);
           },
-          onStage: ({ value }) => {
+          onStage: ({ value, label }) => {
             setRedesign(true);
-            if (value) setStage(value);
+            const next = normalizeStage(value);
+            // Server re-emits stage every turn — only a real transition gets
+            // a chapter divider.
+            if (!next || next === stageRef.current) return;
+            setStageBoth(next);
+            seqRef.current += 1;
+            const id = `dv-${seqRef.current}`;
+            const dividerLabel = label || stageLabel(next);
+            setMessages((prev) => {
+              // Entering Looking Ahead retires any never-tapped cards (the
+              // pick happened in words instead).
+              const pruned = next === 'ahead' ? prev.filter((m) => m.kind !== 'style_choices') : prev;
+              const item = { id, kind: 'divider', label: dividerLabel };
+              // The divider belongs BEFORE the coach bubble that opens the
+              // new chapter — which is usually mid-stream when this event
+              // arrives. Insert ahead of the streaming bubble.
+              const idx = pruned.findIndex((m) => m.streaming);
+              if (idx === -1) return [...pruned, item];
+              return [...pruned.slice(0, idx), item, ...pruned.slice(idx)];
+            });
           },
           onStyleChoices: ({ options }) => {
-            setStyleOptions(Array.isArray(options) && options.length ? options : null);
-            setShowStyleCards(true);
+            // Cards are a transcript ITEM at their chronological position —
+            // they scroll with the conversation like everything else.
+            seqRef.current += 1;
+            const id = `sc-${seqRef.current}`;
+            const opts = Array.isArray(options) && options.length ? options : null;
+            setMessages((prev) =>
+              prev.some((m) => m.kind === 'style_choices')
+                ? prev
+                : [...prev, { id, kind: 'style_choices', options: opts }]
+            );
           },
           onDone: () => {
             setMessages((prev) => prev.map((m) =>
@@ -276,7 +314,7 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
         // Redesign payload (knob on): build card + server-tracked state.
         if (startData.redesign) {
           setRedesign(true);
-          if (startData.stage) setStage(startData.stage);
+          if (startData.stage) setStageBoth(normalizeStage(startData.stage));
           if (startData.stylePick) setStylePicked(startData.stylePick);
           if (startData.buildCard) setBuildCard(startData.buildCard);
         }
@@ -288,15 +326,15 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
         if (startData.resumed) {
           try {
             const { session: priorSession, messages: priorMessages } = await getSession(token, startData.sessionId);
-            // Redesign resume: re-render the tap cards when the beats went
-            // out but no pick was ever captured (stage + pick come from the
-            // server-stamped session row, not the transcript).
+            // Redesign resume: stage + pick come from the server-stamped
+            // session row, not the transcript.
+            const resumeNeedsCards = !!(
+              startData.redesign && priorSession &&
+              priorSession.beats_delivered_at && !priorSession.style_pick
+            );
             if (!cancelled && startData.redesign && priorSession) {
-              if (priorSession.stage) setStage(priorSession.stage);
+              if (priorSession.stage) setStageBoth(normalizeStage(priorSession.stage));
               if (priorSession.style_pick) setStylePicked(priorSession.style_pick);
-              if (priorSession.beats_delivered_at && !priorSession.style_pick) {
-                setShowStyleCards(true);
-              }
             }
             if (!cancelled && Array.isArray(priorMessages) && priorMessages.length > 0) {
               hadPriorTurns = true;
@@ -305,10 +343,18 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
                 return {
                   id: `r-${seqRef.current}`,
                   role: m.role === 'builder' ? 'user' : 'coach',
-                  content: m.content || '',
+                  // Persisted tap turns ('[Builder tapped: …]') display as
+                  // the sent message they represent.
+                  content: displayTurnContent(m.content || ''),
                   seq: seqRef.current,
                 };
               });
+              // Beats went out but no pick was ever captured — re-render the
+              // tap cards at the end of the hydrated transcript.
+              if (resumeNeedsCards) {
+                seqRef.current += 1;
+                hydrated.push({ id: `sc-${seqRef.current}`, kind: 'style_choices', options: null });
+              }
               setMessages(hydrated);
             }
           } catch (hydrateErr) {
@@ -359,13 +405,21 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
     sendChat(messageText.trim());
   };
 
-  // Taste-test tap: optimistic collapse to the confirmation chip, then send
-  // the structured pick as a chat turn (empty message + meta). The server
+  // Taste-test tap: the pick behaves exactly like a sent message — the cards
+  // are REPLACED by a normal user bubble at the same spot, then the pick goes
+  // to the server as a structured chat turn (empty message + meta), which
   // records it first-write-wins and persists the teaching method immediately.
-  const handleStylePick = (family) => {
-    if (isSending || stylePicked) return;
-    setStylePicked(family);
-    sendChat('', { style_pick: family });
+  const handleStylePick = (option) => {
+    if (isSending || stylePicked || !option?.family) return;
+    setStylePicked(option.family);
+    seqRef.current += 1;
+    const id = `u-${seqRef.current}`;
+    const seq = seqRef.current;
+    setMessages((prev) => [
+      ...prev.filter((m) => m.kind !== 'style_choices'),
+      { id, role: 'user', content: `${option.label} — ${option.description}`, seq },
+    ]);
+    sendChat('', { style_pick: option.family });
   };
 
   // Finalize the session (enqueues server-side extraction) then hand control
@@ -506,6 +560,33 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
             </div>
           )}
           {messages.map((message, index) => {
+            // ---- Redesign transcript items ----
+            // Chapter divider: each stage reads as its own piece of the
+            // conversation instead of one long chat.
+            if (message.kind === 'divider') {
+              return (
+                <div key={message.id ?? index} className="flex items-center gap-3 my-8" role="separator">
+                  <div className="flex-1 h-px bg-stardust" />
+                  <span className="text-xs font-proxima-bold uppercase tracking-wide text-pursuit-purple">
+                    {message.label}
+                  </span>
+                  <div className="flex-1 h-px bg-stardust" />
+                </div>
+              );
+            }
+            // Taste-test tap cards — inline at their chronological position;
+            // a tap replaces this item with a normal user bubble.
+            if (message.kind === 'style_choices') {
+              return (
+                <div key={message.id ?? index}>
+                  <StyleChoiceCards
+                    options={message.options}
+                    disabled={isSending || isFinishing || isCompleted}
+                    onPick={handleStylePick}
+                  />
+                </div>
+              );
+            }
             // Coach bubble waiting on its first SSE chunk — show the Pursuit
             // preloader inline, same pattern as Learning.jsx (line ~1762).
             // Once any content has arrived, switch to the streaming markdown
@@ -542,17 +623,6 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
               </div>
             );
           })}
-          {/* Taste-test tap cards — shown when the server says so (or on
-              resume with beats out + no pick); collapse to a chip once
-              picked. Typing an answer instead of tapping stays valid. */}
-          {showStyleCards && !isCompleted && (
-            <StyleChoiceCards
-              options={styleOptions}
-              pickedFamily={stylePicked}
-              disabled={isSending || isFinishing}
-              onPick={handleStylePick}
-            />
-          )}
           {/* The wrap payoff, made durable: the Coach Card renders in-chat
               once the session completes (it also lives on the Dashboard). */}
           {redesign && isCompleted && (
