@@ -282,36 +282,20 @@ describe('OnboardingInterface — redesign', () => {
     redesign: true,
     stage: 'story',
     stylePick: null,
-    buildCard: { whatYouBuilt: 'A resume tailor that rewrites bullets per posting', artifactUrl: null },
   };
 
-  it('renders the BuildCard and StageDots from the /start payload', async () => {
+  it('renders the labeled StageDots from the /start payload (no build chrome — the workshop material lives in the coach\'s context only)', async () => {
     startSession.mockResolvedValue(REDESIGN_START);
     await renderOnboarding();
-    expect(screen.getByText(/your workshop build/i)).toBeInTheDocument();
-    expect(screen.getByText(/resume tailor/i)).toBeInTheDocument();
     // Labeled dots — 3 chapters
     expect(screen.getByText('Getting to Know You')).toBeInTheDocument();
     expect(screen.getByText('How You Learn')).toBeInTheDocument();
     expect(screen.getByText('Looking Ahead')).toBeInTheDocument();
-    // No artifact link — url was null (unvalidated links never render)
-    expect(screen.queryByText(/view your build/i)).not.toBeInTheDocument();
-  });
-
-  it('renders the artifact link ONLY when the server validated one', async () => {
-    startSession.mockResolvedValue({
-      ...REDESIGN_START,
-      buildCard: { whatYouBuilt: 'A flashcard site', artifactUrl: 'https://example.com/app' },
-    });
-    await renderOnboarding();
-    const link = screen.getByRole('link', { name: /view your build/i });
-    expect(link).toHaveAttribute('href', 'https://example.com/app');
   });
 
   it('legacy start payload renders NO redesign chrome', async () => {
     startSession.mockResolvedValue({ sessionId: 'sess-1', resumed: false, buildReviewReady: true });
     await renderOnboarding();
-    expect(screen.queryByText(/your workshop build/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Getting to Know You')).not.toBeInTheDocument();
   });
 

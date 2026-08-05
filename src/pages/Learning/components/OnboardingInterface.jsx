@@ -14,7 +14,6 @@ import AutoExpandTextarea from '../../../components/AutoExpandTextarea';
 import TaskCompletionBar from '../../../components/TaskCompletionBar/TaskCompletionBar';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import BuildCard from './onboarding/BuildCard';
 import StageDots, { stageLabel, normalizeStage } from './onboarding/StageDots';
 import StyleChoiceCards from './onboarding/StyleChoiceCards';
 import CoachCard from './onboarding/CoachCard';
@@ -78,7 +77,6 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
   // ---- Redesign state (server-driven; all inert when the knob is off) ----
   const [redesign, setRedesign] = useState(false);
   const [stage, setStage] = useState('story');          // server-stamped via SSE `stage` events
-  const [buildCard, setBuildCard] = useState(null);     // { whatYouBuilt, artifactUrl } from /start
   const [stylePicked, setStylePicked] = useState(null); // family key
   // Ref-mirror of stage so SSE handlers (closures) can compare against the
   // CURRENT stage — the server re-emits `stage` every turn; a transcript
@@ -316,7 +314,6 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
           setRedesign(true);
           if (startData.stage) setStageBoth(normalizeStage(startData.stage));
           if (startData.stylePick) setStylePicked(startData.stylePick);
-          if (startData.buildCard) setBuildCard(startData.buildCard);
         }
 
         // Resume: pull prior transcript ONLY when the server tells us the
@@ -548,9 +545,6 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
           when scrolled to bottom; mid-scroll messages just slide behind it. */}
       <div className="flex-1 min-h-0 overflow-y-auto py-8 px-6 pb-44">
         <div className="max-w-2xl mx-auto">
-          {redesign && buildCard && (
-            <BuildCard whatYouBuilt={buildCard.whatYouBuilt} artifactUrl={buildCard.artifactUrl} />
-          )}
           {messages.length === 0 && (
             <div className="flex items-center gap-3">
               <img src="/preloader.gif" alt="Loading…" className="w-8 h-8" />
