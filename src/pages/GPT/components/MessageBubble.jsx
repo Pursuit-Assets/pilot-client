@@ -3,6 +3,12 @@ import ReactMarkdown from 'react-markdown';
 import { FileText, Video, Link as LinkIcon } from 'lucide-react';
 import { Button } from '../../../components/ui/button';
 import { cn } from '../../../lib/utils';
+import { createCodeRenderers } from '../../../components/markdown/codeRenderers';
+
+const codeRenderers = createCodeRenderers({
+  inlineClassName: 'px-1.5 py-0.5 rounded text-sm font-mono bg-gray-200 text-carbon-black',
+  preClassName: 'p-3 rounded my-2 overflow-x-auto text-sm font-mono bg-gray-100 text-carbon-black',
+});
 
 function MessageBubble({ message, onContentSummary, getMessageRole, getMessageId }) {
   const role = getMessageRole(message);
@@ -164,31 +170,8 @@ function MessageBubble({ message, onContentSummary, getMessageRole, getMessageId
             a: ({ node, children, ...props }) => (
               <a className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
             ),
-            code: ({ node, inline, className, children, ...props }) => {
-              if (inline) {
-                return (
-                  <code
-                    className="px-1.5 py-0.5 rounded text-sm font-mono bg-gray-200 text-carbon-black"
-                    {...props}
-                  >
-                    {children}
-                  </code>
-                );
-              }
-              return (
-                <code className="block" {...props}>
-                  {children}
-                </code>
-              );
-            },
-            pre: ({ node, children, ...props }) => (
-              <pre
-                className="p-3 rounded my-2 overflow-x-auto text-sm font-mono bg-gray-100 text-carbon-black"
-                {...props}
-              >
-                {children}
-              </pre>
-            ),
+            code: codeRenderers.code,
+            pre: codeRenderers.pre,
             blockquote: ({ node, children, ...props }) => (
               <blockquote
                 className="border-l-4 border-gray-300 pl-4 my-2 italic text-gray-700"

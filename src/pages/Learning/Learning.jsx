@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback, createContext, useContext } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FaCheckCircle, FaUsers, FaUserAlt, FaBook, FaPaperPlane, FaArrowLeft, FaArrowRight, FaBars, FaLink, FaExternalLinkAlt, FaEdit, FaCheck, FaTimes, FaFileAlt, FaVideo, FaBrain, FaComments, FaClipboardList, FaLock } from 'react-icons/fa';
 import ReactMarkdown from 'react-markdown';
+import { createCodeRenderers } from '../../components/markdown/codeRenderers';
 import useAuthStore from '../../stores/authStore';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
@@ -32,27 +33,10 @@ import { streamLearningMessage } from '../../utils/api';
 import { useStreamingText } from '../../hooks/useStreamingText';
 import { createStreamBuffer } from '../../utils/streamBufferUtils';
 
-// react-markdown v10 removed the `inline` prop from the `code` renderer, so inline
-// code and fenced blocks arrive identically. The `pre` renderer flags its subtree
-// instead — anything outside one is inline and must not break onto its own line.
-const InFencedBlock = createContext(false);
-
-const MarkdownCode = ({ node, className, children, ...props }) => {
-  const isFenced = useContext(InFencedBlock);
-
-  if (isFenced) {
-    return <code className={className} {...props}>{children}</code>;
-  }
-
-  return (
-    <code
-      className="px-1.5 py-0.5 rounded text-sm font-mono bg-gray-200 text-carbon-black"
-      {...props}
-    >
-      {children}
-    </code>
-  );
-};
+const codeRenderers = createCodeRenderers({
+  inlineClassName: 'px-1.5 py-0.5 rounded text-sm font-mono bg-gray-200 text-carbon-black',
+  preClassName: 'p-4 rounded-lg my-4 overflow-x-auto text-sm font-mono bg-gray-100 text-carbon-black',
+});
 
 // Component that wraps ReactMarkdown with streaming text support
 // Uses useStreamingText to smooth out bursty SSE chunks into natural typing flow
@@ -140,17 +124,8 @@ const StreamingMarkdownMessage = ({ content, animateOnMount = false }) => {
           a: ({ node, children, ...props }) => (
             <a className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
           ),
-          code: MarkdownCode,
-          pre: ({ node, children, ...props }) => (
-            <InFencedBlock.Provider value={true}>
-              <pre
-                className="p-4 rounded-lg my-4 overflow-x-auto text-sm font-mono bg-gray-100 text-carbon-black"
-                {...props}
-              >
-                {children}
-              </pre>
-            </InFencedBlock.Provider>
-          ),
+          code: codeRenderers.code,
+          pre: codeRenderers.pre,
           blockquote: ({ node, children, ...props }) => (
             <blockquote
               className="border-l-4 border-gray-300 pl-4 my-4 italic text-gray-700"
