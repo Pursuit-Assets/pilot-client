@@ -18,7 +18,6 @@ import {
 } from '../../components/ui/select';
 import { toLegacyFormat } from '../AdminDashboard/utils/cohortUtils';
 import { usePermissions } from '../../hooks/usePermissions';
-import CoachCard from '../Learning/components/onboarding/CoachCard';
 import './Dashboard.css';
 
 function Dashboard() {
@@ -1253,15 +1252,6 @@ function Dashboard() {
           </div>
 
           {renderBuilderWeeklyView()}
-
-          {/* Coach Card — the coach's read on the builder from Day-0
-              onboarding (compact; renders nothing for builders without one).
-              Full card lives at the end of the onboarding conversation. */}
-          {user?.role === 'builder' && (
-            <div className="mt-6 max-w-2xl">
-              <CoachCard compact />
-            </div>
-          )}
         </div>
 
         {/* Mobile View */}
