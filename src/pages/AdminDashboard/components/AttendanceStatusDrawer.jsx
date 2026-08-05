@@ -3,6 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../../../component
 import { Badge } from '../../../components/ui/badge';
 import { Plus, Send } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -25,6 +26,9 @@ const FILTER_LABELS = {
 };
 
 const AttendanceStatusDrawer = ({ open, onClose, statusFilter, builders, selectedDate, cohortName, onRefresh }) => {
+  // Read-only accounts (interview candidates) open this drawer to see WHO was present,
+  // absent or excused — real signal for their exercise — but cannot change a record.
+  const { isReadOnly } = usePermissions();
   const token = useAuthStore((s) => s.token);
   const user = useAuthStore((s) => s.user);
   const [savingId, setSavingId] = useState(null);
@@ -182,7 +186,7 @@ const AttendanceStatusDrawer = ({ open, onClose, statusFilter, builders, selecte
 
         <div className="px-5 py-4 space-y-3">
           {/* Absent: Notify action bar */}
-          {isAbsent && filtered.length > 0 && (
+          {isAbsent && filtered.length > 0 && !isReadOnly && (
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2 opacity-60">
               <p className="text-xs font-medium text-slate-500">Notify {filtered.length} absent builder{filtered.length !== 1 ? 's' : ''} <span className="text-[10px] text-slate-400">(coming soon)</span></p>
               <div className="flex gap-2">
@@ -215,6 +219,10 @@ const AttendanceStatusDrawer = ({ open, onClose, statusFilter, builders, selecte
                     <div className="flex items-center gap-2">
                       {savingId === b.userId ? (
                         <span className="text-[10px] text-slate-400">Saving...</span>
+                      ) : isReadOnly ? (
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${STATUS_COLORS[b.status] || STATUS_COLORS.pending}`}>
+                          {(b.status || 'pending').charAt(0).toUpperCase() + (b.status || 'pending').slice(1)}
+                        </span>
                       ) : (
                         <select
                           value={isExcusePending ? 'excused' : b.status}

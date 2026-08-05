@@ -29,6 +29,9 @@ const AdminDashboard = () => {
   const user = useAuthStore((s) => s.user);
   const token = useAuthStore((s) => s.token);
   const { canAccessPage } = usePermissions();
+  // Interview candidates get this page read-only — enforced server-side by
+  // middleware/readOnlyRole.js, surfaced here so it doesn't read as a broken page.
+  const isReadOnly = user?.role === 'candidate';
   const [activeTab, setActiveTab] = useState('today');
 
   const [programs, setPrograms] = useState([]);
@@ -122,10 +125,22 @@ const AdminDashboard = () => {
       <div className="bg-white border-b border-[#E3E3E3] px-8 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
-              Cohort Hub
-            </h1>
-            <p className="text-slate-500 text-sm mt-0.5">Per-cohort facilitator workspace</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+                Cohort Hub
+              </h1>
+              {/* Interview candidates read this dashboard for their exercise. The server
+                  refuses every write from the role, so say so up front rather than letting
+                  them discover it by clicking. */}
+              {isReadOnly && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium">
+                  Read-only
+                </span>
+              )}
+            </div>
+            <p className="text-slate-500 text-sm mt-0.5">
+              {isReadOnly ? 'Viewing cohort data — this account cannot make changes' : 'Per-cohort facilitator workspace'}
+            </p>
           </div>
           <div className="flex items-center gap-4 flex-shrink-0">
             {programs.length > 1 && (

@@ -60,6 +60,11 @@ const Layout = ({ children, isLoading = false }) => {
   
   // Role flags for dropdown visibility
   const isStaffOrAdminRole = userRole === 'staff' || userRole === 'admin';
+  // Interview candidates hold page:admin_attendance + page:assessment_grades only
+  // because the Cohort Hub's data endpoints are gated on them — the Attendance and
+  // Assessments PAGES are not part of their exercise, and App.jsx bounces them back to
+  // the Cohort Hub. Keep those links out of their nav so nothing dead-ends.
+  const isCandidate = userRole === 'candidate';
   // Program dropdown -- staff/admin roles
   const programDropdownItems = isStaffOrAdminRole ? [
     canViewAdminDashboard && { to: '/admin-dashboard', label: 'Cohort Hub' },
@@ -103,9 +108,13 @@ const Layout = ({ children, isLoading = false }) => {
   // These appear as flat nav links instead of inside role-labeled dropdowns
   const customGrantedItems = !isStaffOrAdminRole ? [
     canViewAdmissions && { to: '/admissions-dashboard', icon: Users, label: 'Admissions' },
-    canViewAssessmentGrades && { to: '/admin/assessment-grades', icon: Award, label: 'Assessments' },
-    canViewAdminAttendance && { to: '/admin-attendance-dashboard', icon: CalendarIcon, label: 'Attendance' },
-    canViewAdminDashboard && { to: '/admin-dashboard', icon: Settings, label: 'Cohort Stats' },
+    canViewAssessmentGrades && !isCandidate && { to: '/admin/assessment-grades', icon: Award, label: 'Assessments' },
+    canViewAdminAttendance && !isCandidate && { to: '/admin-attendance-dashboard', icon: CalendarIcon, label: 'Attendance' },
+    canViewAdminDashboard && { to: '/admin-dashboard', icon: Settings, label: isCandidate ? 'Cohort Hub' : 'Cohort Stats' },
+    // Same permission key as the Cohort Hub, and reachable by URL for anyone who holds it —
+    // surfacing the link keeps interview candidates (who need the cohort-level trends for
+    // their exercise) from having to be sent a raw URL.
+    canViewAdminDashboard && { to: '/program-analytics', icon: BarChart3, label: 'Program Analytics' },
     // Enterprise Admin is rendered as an explicit nav link (not in customGrantedItems) to avoid duplication
     // canViewContent && { to: '/content', icon: Target, label: 'Curriculum' }, // hidden — use Content Mgmt instead
     canViewContentPreview && { to: '/content-preview', icon: Target, label: 'Content Mgmt' },
@@ -386,7 +395,9 @@ const Layout = ({ children, isLoading = false }) => {
         {/* Scrollable Navigation Links Container */}
         <div className="flex-1 overflow-y-auto">
           {/* Navigation Links */}
-          {renderNavLink('/dashboard', <img src={logo} alt="Logo" className="h-5 w-5 object-contain" />, 'Dashboard')}
+          {/* Dashboard is the builder home; a candidate has no enrollment so it's empty
+              for them (App.jsx redirects them to the Cohort Hub). */}
+          {renderNavLink('/dashboard', <img src={logo} alt="Logo" className="h-5 w-5 object-contain" />, 'Dashboard', !isCandidate)}
           
           {/* Learning - permission-based */}
           {renderNavLink('/learning', (

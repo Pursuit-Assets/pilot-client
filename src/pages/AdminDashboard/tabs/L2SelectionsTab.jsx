@@ -9,6 +9,7 @@ import {
 import BuilderDrawer from '../components/BuilderDrawer';
 import DemoRatingModal from '../components/DemoRatingModal';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 
 const LEGACY_API = 'https://ai-pilot-admin-dashboard-866060457933.us-central1.run.app/api';
 const API_URL = import.meta.env.VITE_API_URL;
@@ -178,7 +179,9 @@ const FilterDropdown = ({ options, selected, onChange, searchable, label }) => {
 
 // ─── Selection status dropdown ───────────────────────────────────────────────
 
-const SelectionDropdown = ({ value, onChange }) => {
+// `readOnly` renders the current selection as a static emoji — the L2 offer decision is
+// staff-only, but a read-only viewer still needs to see where each builder stands.
+const SelectionDropdown = ({ value, onChange, readOnly }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -189,6 +192,10 @@ const SelectionDropdown = ({ value, onChange }) => {
   }, []);
 
   const config = SELECTION_CONFIG[value] || SELECTION_CONFIG.pending;
+
+  if (readOnly) {
+    return <span className="text-lg" title={config.label}>{config.emoji}</span>;
+  }
 
   return (
     <div className="relative inline-block" ref={ref}>
@@ -220,6 +227,9 @@ const SelectionDropdown = ({ value, onChange }) => {
 
 const L2SelectionsTab = ({ selectedCohortId, cohorts }) => {
   const token = useAuthStore((s) => s.token);
+  // Read-only accounts (interview candidates) can read the L2 signal but not record a
+  // decision — the server refuses the POST, so the controls aren't offered.
+  const { isReadOnly } = usePermissions();
   const [builders, setBuilders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState({ key: 'attendance_percentage', dir: 'desc' });
@@ -737,17 +747,22 @@ const L2SelectionsTab = ({ selectedCohortId, cohorts }) => {
                             <InlineStars
                               value={rating}
                               onClick={r => openDemoModal(b, r)}
-                              disabled={!hasDemo}
+                              disabled={!hasDemo || isReadOnly}
                             />
                           </td>
-                          {/* Notes */}
+                          {/* Notes — a read-only viewer can open existing review notes to
+                              read them, but the "+" (add) affordance is not offered. */}
                           <td className="py-2 px-2 text-center">
-                            <button
-                              onClick={() => openDemoModal(b, rating)}
-                              className={`text-xs hover:underline ${fbCount > 0 ? 'text-[#4242EA]' : 'text-slate-400'}`}
-                            >
-                              <FileText size={13} className="inline" /> {fbCount > 0 ? fbCount : '+'}
-                            </button>
+                            {isReadOnly && fbCount === 0 ? (
+                              <span className="text-xs text-slate-300">—</span>
+                            ) : (
+                              <button
+                                onClick={() => openDemoModal(b, rating)}
+                                className={`text-xs hover:underline ${fbCount > 0 ? 'text-[#4242EA]' : 'text-slate-400'}`}
+                              >
+                                <FileText size={13} className="inline" /> {fbCount > 0 ? fbCount : '+'}
+                              </button>
+                            )}
                           </td>
                           {/* Enrollment Status */}
                           <td className="py-2 px-2 text-center">
@@ -765,6 +780,7 @@ const L2SelectionsTab = ({ selectedCohortId, cohorts }) => {
                             <SelectionDropdown
                               value={status}
                               onChange={s => handleSelectionChange(b.user_id, s)}
+                              readOnly={isReadOnly}
                             />
                           </td>
                         </tr>

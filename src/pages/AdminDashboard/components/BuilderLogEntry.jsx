@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
 import { ChevronDown, ChevronUp, AlertTriangle, ShieldAlert, Users, MessageSquarePlus, Pencil, Check, X } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -47,6 +48,9 @@ const SUPPORT_STATUS_COLORS = {
 
 const BuilderLogEntry = ({ log, onStatusChange, onSupportStatusChange, onLogUpdated }) => {
   const token = useAuthStore((s) => s.token);
+  // Read-only accounts (interview candidates) read the log and its support case; editing
+  // the note, the status, or adding an update is withheld — the server refuses those.
+  const { isReadOnly } = usePermissions();
   const [expanded, setExpanded] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [supportStatusNote, setSupportStatusNote] = useState('');
@@ -231,8 +235,8 @@ const BuilderLogEntry = ({ log, onStatusChange, onSupportStatusChange, onLogUpda
             value={log.status}
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => { e.stopPropagation(); handleStatusChange(e.target.value); }}
-            disabled={updatingStatus}
-            className={`text-[10px] px-1.5 py-0.5 rounded border border-[#E3E3E3] bg-white cursor-pointer ${
+            disabled={updatingStatus || isReadOnly}
+            className={`text-[10px] px-1.5 py-0.5 rounded border border-[#E3E3E3] bg-white ${isReadOnly ? 'appearance-none cursor-default' : 'cursor-pointer'} ${
               log.status === 'open' ? 'text-blue-600' : log.status === 'in_progress' ? 'text-yellow-600' : 'text-slate-500'
             }`}
           >
@@ -251,7 +255,7 @@ const BuilderLogEntry = ({ log, onStatusChange, onSupportStatusChange, onLogUpda
           <div>
             <div className="flex items-center justify-between mb-1">
               <p className="text-[10px] font-semibold text-slate-400 uppercase">Notes</p>
-              {!editing && (
+              {!editing && !isReadOnly && (
                 <button type="button" onClick={() => setEditing(true)} className="flex items-center gap-1 text-[10px] text-[#4242EA] hover:text-[#3535c8] font-medium">
                   <Pencil size={10} /> Edit
                 </button>
@@ -350,7 +354,8 @@ const BuilderLogEntry = ({ log, onStatusChange, onSupportStatusChange, onLogUpda
                 <select
                   value={support.current_status}
                   onChange={(e) => handleSupportStatusChange(e.target.value)}
-                  className={`text-[10px] px-1.5 py-0.5 rounded border border-[#E3E3E3] bg-white cursor-pointer ${
+                  disabled={isReadOnly}
+                  className={`text-[10px] px-1.5 py-0.5 rounded border border-[#E3E3E3] bg-white ${isReadOnly ? 'appearance-none cursor-default' : 'cursor-pointer'} ${
                     SUPPORT_STATUS_COLORS[support.current_status]?.split(' ')[1] || ''
                   }`}
                 >
@@ -396,7 +401,7 @@ const BuilderLogEntry = ({ log, onStatusChange, onSupportStatusChange, onLogUpda
               )}
 
               {/* Add Update button */}
-              {!showAddUpdate && !showSupportNoteInput && (
+              {!showAddUpdate && !showSupportNoteInput && !isReadOnly && (
                 <button
                   type="button"
                   onClick={() => setShowAddUpdate(true)}

@@ -7,6 +7,8 @@ const isValidUserType = (user) => {
     user.userType === 'builder' ||
     user.userType === 'workshop_participant' ||
     user.userType === 'volunteer' ||
+    // Interview candidates: read-only Cohort Hub access, no enrollment.
+    user.userType === 'candidate' ||
     (user.userType === 'applicant' && user.isWorkshopParticipant)
   );
 };
