@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, createContext, useContext } from 'react';
 import { FaCheckCircle } from 'react-icons/fa';
 import ReactMarkdown from 'react-markdown';
 import useAuthStore from '../../../stores/authStore';
@@ -25,6 +25,28 @@ import { createStreamBuffer } from '../../../utils/streamBufferUtils';
 
 import '../../Learning/Learning.css';
 import { useStreamingText } from '../../../hooks/useStreamingText';
+
+// react-markdown v10 removed the `inline` prop from the `code` renderer, so inline
+// code and fenced blocks arrive identically. The `pre` renderer flags its subtree
+// instead — anything outside one is inline and must not break onto its own line.
+const InFencedBlock = createContext(false);
+
+const MarkdownCode = ({ node, className, children, ...props }) => {
+  const isFenced = useContext(InFencedBlock);
+
+  if (isFenced) {
+    return <code className={className} {...props}>{children}</code>;
+  }
+
+  return (
+    <code
+      className="px-1.5 py-0.5 rounded text-sm font-mono bg-gray-200 text-carbon-black"
+      {...props}
+    >
+      {children}
+    </code>
+  );
+};
 
 // Component that wraps ReactMarkdown with streaming text support
 // Uses useStreamingText to smooth out bursty SSE chunks into natural typing flow
@@ -112,30 +134,16 @@ const StreamingMarkdownMessage = ({ content, animateOnMount = false }) => {
           a: ({ node, children, ...props }) => (
             <a className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
           ),
-          code: ({ node, inline, className, children, ...props }) => {
-            if (inline) {
-              return (
-                <code
-                  className="px-1.5 py-0.5 rounded text-sm font-mono bg-gray-200 text-carbon-black"
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            }
-            return (
-              <code className="block" {...props}>
-                {children}
-              </code>
-            );
-          },
+          code: MarkdownCode,
           pre: ({ node, children, ...props }) => (
-            <pre
-              className="p-4 rounded-lg my-4 overflow-x-auto text-sm font-mono bg-gray-100 text-carbon-black"
-              {...props}
-            >
-              {children}
-            </pre>
+            <InFencedBlock.Provider value={true}>
+              <pre
+                className="p-4 rounded-lg my-4 overflow-x-auto text-sm font-mono bg-gray-100 text-carbon-black"
+                {...props}
+              >
+                {children}
+              </pre>
+            </InFencedBlock.Provider>
           ),
           blockquote: ({ node, children, ...props }) => (
             <blockquote

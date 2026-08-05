@@ -43,11 +43,6 @@ import PathfinderAdminDashboard from './pages/PathfinderDashboard';
 import PathfinderAdmin from './pages/PathfinderAdmin';
 import PathfinderNetwork from './pages/PathfinderNetwork';
 import PathfinderJobs from './pages/PathfinderJobs';
-import MockInterviewSetup from './pages/MockInterview/MockInterviewSetup';
-import MockInterviewSession from './pages/MockInterview/MockInterviewSession';
-import MockInterviewFeedback from './pages/MockInterview/MockInterviewFeedback';
-import MockInterviewHistory from './pages/MockInterview/MockInterviewHistory';
-import InterviewRubricAdmin from './pages/MockInterview/InterviewRubricAdmin';
 import PathfinderCompass from './pages/PathfinderCompass';
 import StaffNetworkDashboard from './pages/StaffNetworkDashboard';
 import PathfinderCoaching from './pages/PathfinderCoaching';
@@ -386,14 +381,6 @@ function App() {
           </Layout>
         } />
         
-        {/* Interview Rubric Management (Admin) */}
-        <Route path="/admin/interview-rubrics" element={
-          <Layout>
-            <PermissionRoute permission={PAGE_PERMISSIONS.ADMIN_SECTION}>
-              <InterviewRubricAdmin />
-            </PermissionRoute>
-          </Layout>
-        } />
 
         {/* Weekly Reports Management (Admin + custom permission) */}
         <Route path="/admin/weekly-reports" element={
@@ -499,10 +486,6 @@ function App() {
               </PermissionRoute>
             }
           />
-          <Route path="mock-interview" element={<MockInterviewSetup />} />
-          <Route path="mock-interview/session/:interviewId" element={<MockInterviewSession />} />
-          <Route path="mock-interview/feedback/:interviewId" element={<MockInterviewFeedback />} />
-          <Route path="mock-interview/history" element={<MockInterviewHistory />} />
         </Route>
         
         {/* Compass - top-level route */}
