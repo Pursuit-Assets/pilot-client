@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FaCheckCircle } from 'react-icons/fa';
 import ReactMarkdown from 'react-markdown';
+import { createCodeRenderers } from '../../../components/markdown/codeRenderers';
 import useAuthStore from '../../../stores/authStore';
 import Swal from 'sweetalert2';
 
@@ -25,6 +26,11 @@ import { createStreamBuffer } from '../../../utils/streamBufferUtils';
 
 import '../../Learning/Learning.css';
 import { useStreamingText } from '../../../hooks/useStreamingText';
+
+const codeRenderers = createCodeRenderers({
+  inlineClassName: 'px-1.5 py-0.5 rounded text-sm font-mono bg-gray-200 text-carbon-black',
+  preClassName: 'p-4 rounded-lg my-4 overflow-x-auto text-sm font-mono bg-gray-100 text-carbon-black',
+});
 
 // Component that wraps ReactMarkdown with streaming text support
 // Uses useStreamingText to smooth out bursty SSE chunks into natural typing flow
@@ -112,31 +118,8 @@ const StreamingMarkdownMessage = ({ content, animateOnMount = false }) => {
           a: ({ node, children, ...props }) => (
             <a className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
           ),
-          code: ({ node, inline, className, children, ...props }) => {
-            if (inline) {
-              return (
-                <code
-                  className="px-1.5 py-0.5 rounded text-sm font-mono bg-gray-200 text-carbon-black"
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            }
-            return (
-              <code className="block" {...props}>
-                {children}
-              </code>
-            );
-          },
-          pre: ({ node, children, ...props }) => (
-            <pre
-              className="p-4 rounded-lg my-4 overflow-x-auto text-sm font-mono bg-gray-100 text-carbon-black"
-              {...props}
-            >
-              {children}
-            </pre>
-          ),
+          code: codeRenderers.code,
+          pre: codeRenderers.pre,
           blockquote: ({ node, children, ...props }) => (
             <blockquote
               className="border-l-4 border-gray-300 pl-4 my-4 italic text-gray-700"
