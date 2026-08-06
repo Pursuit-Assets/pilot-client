@@ -30,6 +30,7 @@ import {
 import { formatPhoneNumber, getStatusBadgeClasses, formatStatus, getColumnLabel } from '../shared/utils';
 import { Input } from '../../../../components/ui/input';
 import Swal from 'sweetalert2';
+import { toast } from 'sonner';
 
 // Filter options for each column
 const filterOptions = {
@@ -811,18 +812,44 @@ const ApplicationsTab = ({
       setSelectedApplicants([]);
       setTargetCohortId('');
 
-      if (failed.length > 0) {
-        Swal.fire({
-          icon: moved > 0 ? 'warning' : 'error',
-          title: moved > 0 ? `Moved ${moved}, skipped ${failed.length}` : 'No applicants were moved',
-          html: `<div style="text-align:left;font-size:0.85rem;max-height:16rem;overflow-y:auto">${
-            failed.map((f) => `<div style="margin-bottom:.5rem"><strong>Applicant ${f.applicant_id}</strong><br/>${f.error}</div>`).join('')
-          }</div>`
+      if (failed.length === 0) {
+        toast.success(`Moved ${moved} applicant${moved === 1 ? '' : 's'}`, {
+          description: `Now in ${cohortNameMap[targetCohortId] || 'the selected cohort'}.`
         });
+      } else {
+        // Grouped by reason rather than listed per applicant. Every refusal in a bulk move has one
+        // of two causes, and both are acted on in bulk too ("reinstate these", "give a reason"), so
+        // 20 identical lines are worse than one count per cause. Longer duration because a skipped
+        // applicant is follow-up work, not an FYI.
+        const byReason = failed.reduce((acc, f) => {
+          const reason = f.error || 'Unknown reason';
+          acc[reason] = (acc[reason] || 0) + 1;
+          return acc;
+        }, {});
+        // JSX, not a \n-joined string — sonner renders the description as HTML, where a newline
+        // collapses to a space and every reason would run together on one line.
+        const description = (
+          <span className="flex flex-col gap-1">
+            {Object.entries(byReason).map(([reason, n]) => (
+              <span key={reason}>{n} × {reason}</span>
+            ))}
+          </span>
+        );
+
+        const notify = moved > 0 ? toast.warning : toast.error;
+        notify(
+          moved > 0
+            ? `Moved ${moved}, skipped ${failed.length}`
+            : 'No applicants were moved',
+          { description, duration: 12000 }
+        );
       }
     } catch (error) {
       console.error('Error moving selected applicants to cohort:', error);
-      alert(error.message || 'Failed to move selected applicants');
+      toast.error('Bulk move failed', {
+        description: error.message || 'Failed to move selected applicants',
+        duration: 8000
+      });
     } finally {
       setMovingCohort(false);
     }

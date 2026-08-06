@@ -33,6 +33,12 @@ import { Pencil, Trash2, Plus, Users, Search, Download, X, ArrowRight, Check } f
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
+// Statuses that mean "no longer in this cohort". Kept in step with EXITED_STATUSES in
+// queries/organizationManagement.js — the server FORCES is_active = false for these and a DB
+// constraint (user_enrollment_exit_not_active) forbids the combination outright.
+const EXIT_STATUSES = ['withdrawn', 'dismissed'];
+const isExitStatus = (status) => EXIT_STATUSES.includes(status);
+
 function EnrollmentsTab({ token, setLoading }) {
   const [allEnrollments, setAllEnrollments] = useState([]); // Store all enrollments
   const [cohorts, setCohorts] = useState([]);
@@ -273,7 +279,11 @@ function EnrollmentsTab({ token, setLoading }) {
         cohort_id: cohortId,
         enrolled_date: formData.enrolled_date,
         status: formData.status,
-        is_active: formData.is_active,
+        // The effective value, not the raw state: disabling the checkbox does not clear
+        // formData.is_active, so ticking Active and THEN choosing Withdrawn would still have sent
+        // true. The edit path survives that (the server forces it), but createEnrollment would
+        // have tried to INSERT withdrawn-and-active and been rejected by the DB constraint.
+        is_active: isExitStatus(formData.status) ? false : formData.is_active,
         notes: formData.notes,
         completion_date: formData.completion_date || null,
         withdrawal_date: formData.withdrawal_date || null,
@@ -551,6 +561,7 @@ function EnrollmentsTab({ token, setLoading }) {
             <SelectItem value="in_progress" className="font-proxima">In Progress</SelectItem>
             <SelectItem value="completed" className="font-proxima">Completed</SelectItem>
             <SelectItem value="withdrawn" className="font-proxima">Withdrawn</SelectItem>
+            <SelectItem value="dismissed" className="font-proxima">Dismissed</SelectItem>
             <SelectItem value="deferred" className="font-proxima">Deferred</SelectItem>
           </SelectContent>
         </Select>
@@ -781,6 +792,7 @@ function EnrollmentsTab({ token, setLoading }) {
                       <SelectItem value="in_progress" className="font-proxima">In Progress</SelectItem>
                       <SelectItem value="completed" className="font-proxima">Completed</SelectItem>
                       <SelectItem value="withdrawn" className="font-proxima">Withdrawn</SelectItem>
+            <SelectItem value="dismissed" className="font-proxima">Dismissed</SelectItem>
                       <SelectItem value="deferred" className="font-proxima">Deferred</SelectItem>
                     </SelectContent>
                   </Select>
@@ -800,7 +812,7 @@ function EnrollmentsTab({ token, setLoading }) {
                 </div>
               )}
 
-              {formData.status === 'withdrawn' && (
+              {isExitStatus(formData.status) && (
                 <>
                   <div>
                     <Label htmlFor="withdrawal_date" className="font-proxima">Withdrawal Date</Label>
@@ -838,17 +850,33 @@ function EnrollmentsTab({ token, setLoading }) {
                 />
               </div>
 
-              <div className="flex items-center gap-2">
+              {/* This checkbox is why 39 enrollments ended up withdrawn AND active: the server only
+                  defaulted is_active to false when the field was ABSENT, and this form always sent
+                  it. Leaving "Active" ticked while setting status to Withdrawn produced a row that
+                  every cohort count keying on is_active still counted — December 2025 L1 read 29
+                  enrolled when 1 was. The server now forces it and a DB constraint forbids the
+                  combination, so the box is disabled here rather than sending a value that is about
+                  to be overridden. */}
+              <div className="flex items-start gap-2">
                 <input
                   type="checkbox"
                   id="is_active"
-                  checked={formData.is_active}
+                  checked={isExitStatus(formData.status) ? false : formData.is_active}
+                  disabled={isExitStatus(formData.status)}
                   onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                  className="h-4 w-4 text-[#4242EA] rounded"
+                  className="h-4 w-4 mt-0.5 text-[#4242EA] rounded disabled:opacity-50"
                 />
-                <Label htmlFor="is_active" className="font-proxima cursor-pointer">
-                  Active enrollment (user's current active program)
-                </Label>
+                <div>
+                  <Label htmlFor="is_active" className="font-proxima cursor-pointer">
+                    Active enrollment (user's current active program)
+                  </Label>
+                  {isExitStatus(formData.status) && (
+                    <p className="text-xs text-gray-500 font-proxima mt-1">
+                      A {formData.status} enrollment is never active — the builder stops counting toward
+                      this cohort's numbers. They keep their platform login and their history here.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1055,6 +1083,7 @@ function EnrollmentsTab({ token, setLoading }) {
                       <SelectItem value="in_progress" className="font-proxima">In Progress</SelectItem>
                       <SelectItem value="completed" className="font-proxima">Completed</SelectItem>
                       <SelectItem value="withdrawn" className="font-proxima">Withdrawn</SelectItem>
+            <SelectItem value="dismissed" className="font-proxima">Dismissed</SelectItem>
                       <SelectItem value="deferred" className="font-proxima">Deferred</SelectItem>
                     </SelectContent>
                   </Select>

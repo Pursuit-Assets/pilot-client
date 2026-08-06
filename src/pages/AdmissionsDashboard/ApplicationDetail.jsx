@@ -5,6 +5,7 @@ import NotesSidebar from '../../components/NotesSidebar';
 import BulkActionsModal from '../../components/BulkActionsModal';
 import AttendedEventModal from './components/shared/AttendedEventModal';
 import Swal from 'sweetalert2';
+import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -398,19 +399,20 @@ const ApplicationDetail = () => {
 
             await fetchApplicationDetail();
             await fetchCohortHistory();
-            Swal.fire({
-                icon: 'success',
-                title: 'Cohort Updated',
-                text: 'Applicant cohort assignment has been updated.',
-                timer: 1500,
-                showConfirmButton: false
+            // Outcomes are toasts (sonner, mounted in App.jsx). The reason PROMPT above stays a
+            // dialog on purpose — a toast is non-blocking and cannot collect text, and the reason
+            // is load-bearing: without it the server refuses to move an already-decided applicant.
+            toast.success('Cohort updated', {
+                description: `Moved to ${cohortOptions.find((c) => c.cohort_id === selectedCohortId)?.name || 'the selected cohort'}. The change is recorded in the history below.`
             });
         } catch (error) {
             console.error('Error updating applicant cohort:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'Error',
-                text: error.message || 'Failed to update applicant cohort'
+            // The server answers 400 with an actionable message when the move is refused (a
+            // deferred applicant, or a final decision with no reason), so show it rather than a
+            // generic failure. Longer duration because it's something to act on, not an FYI.
+            toast.error('Cohort not changed', {
+                description: error.message || 'Failed to update applicant cohort',
+                duration: 8000
             });
         } finally {
             setCohortUpdating(false);
