@@ -183,5 +183,38 @@ describe('AutoExpandTextarea', () => {
       act(() => session2.onresult(speechEvent('second message')));
       expect(textarea.value).toBe('second message');
     });
+
+    test('a late onresult flush AFTER send cannot resurrect the sent message (stop→send race, 2026-08-06)', () => {
+      // Real-browser sequence: tap mic off → Chrome's stop() flushes one
+      // final onresult ASYNCHRONOUSLY → user hits send before the flush
+      // lands → the late event used to rewrite the cleared textarea with
+      // the full transcript.
+      const onSubmit = vi.fn();
+      render(<AutoExpandTextarea onSubmit={onSubmit} showMicButton />);
+      const textarea = screen.getByPlaceholderText('Reply to coach...');
+
+      fireEvent.click(screen.getByTitle('Start voice dictation'));
+      const session = FakeSpeechRecognition.instances[0];
+      act(() => session.onresult(speechEvent('hello coach')));
+      // Tap the mic off — the component keeps the session ref so a normal
+      // (pre-send) flush can still land.
+      fireEvent.click(screen.getByTitle('Stop dictation'));
+      expect(textarea.value).toBe('hello coach');
+
+      // Capture the handler as the browser engine holds it, then send.
+      const engineHeldHandler = session.onresult;
+      fireEvent.click(screen.getByTestId('send-button'));
+      expect(onSubmit).toHaveBeenCalledWith('hello coach', expect.any(String));
+      expect(textarea.value).toBe('');
+
+      // Layer 1: clearAfterSubmit nulled the handler — the browser would
+      // find nothing to call.
+      expect(session.onresult).toBeNull();
+
+      // Layer 2 (belt+suspenders): even a retained callback reference is a
+      // no-op — the stale-session guard sees the ref was cleared.
+      act(() => engineHeldHandler(speechEvent('hello coach')));
+      expect(textarea.value).toBe('');
+    });
   });
 });
