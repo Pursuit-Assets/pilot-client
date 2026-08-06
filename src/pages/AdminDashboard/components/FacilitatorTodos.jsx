@@ -332,7 +332,10 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
     setSavingEnrollment(null);
   };
 
-  const todoCount = nextStepLogs.length + unverifiedDays.length + (enrollmentNeedsVerification ? 1 : 0);
+  // Read-only accounts don't get the verification sections at all (see below), so they
+  // must not be counted here either — otherwise the badge promises to-dos that aren't shown.
+  const todoCount = nextStepLogs.length
+    + (isReadOnly ? 0 : unverifiedDays.length + (enrollmentNeedsVerification ? 1 : 0));
 
   return (
     <>
@@ -363,7 +366,7 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
         <CollapsibleContent>
           <div className="border-t border-[#E3E3E3] divide-y divide-[#EFEFEF]">
             {/* Attendance verification reminders */}
-            {unverifiedDays.length > 0 && (
+            {unverifiedDays.length > 0 && !isReadOnly && (
               <div className="px-4 py-3">
                 <div className="flex items-center gap-1.5 mb-2">
                   <CalendarCheck size={12} className="text-amber-500" />
@@ -375,12 +378,10 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
                       <span className="text-xs text-slate-600">
                         {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                       </span>
-                      {!isReadOnly && (
-                        <button onClick={() => openAttendanceVerify(date)}
-                          className="flex items-center gap-1 text-[10px] font-medium text-[#4242EA] hover:underline">
-                          <CheckCircle size={10} /> Review & Verify
-                        </button>
-                      )}
+                      <button onClick={() => openAttendanceVerify(date)}
+                        className="flex items-center gap-1 text-[10px] font-medium text-[#4242EA] hover:underline">
+                        <CheckCircle size={10} /> Review & Verify
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -388,18 +389,16 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
             )}
 
             {/* Enrollment verification */}
-            {enrollmentNeedsVerification && (
+            {enrollmentNeedsVerification && !isReadOnly && (
               <div className="px-4 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <ShieldCheck size={12} className="text-amber-500" />
                   <span className="text-xs text-slate-600">Weekly enrollment verification</span>
                 </div>
-                {!isReadOnly && (
-                  <button onClick={openEnrollmentVerify}
-                    className="flex items-center gap-1 text-[10px] font-medium text-[#4242EA] hover:underline">
-                    <CheckCircle size={10} /> Review & Verify
-                  </button>
-                )}
+                <button onClick={openEnrollmentVerify}
+                  className="flex items-center gap-1 text-[10px] font-medium text-[#4242EA] hover:underline">
+                  <CheckCircle size={10} /> Review & Verify
+                </button>
               </div>
             )}
 
