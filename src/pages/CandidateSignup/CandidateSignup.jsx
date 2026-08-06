@@ -87,6 +87,7 @@ const CandidateSignup = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -132,10 +133,13 @@ const CandidateSignup = () => {
   }, [token]);
 
   const passwordChecks = PASSWORD_RULES.map((r) => ({ ...r, met: r.test(password) }));
+  // Only a match once there's something to match — an empty pair isn't "matching".
+  const passwordsMatch = password.length > 0 && password === confirmPassword;
   const canSubmit =
     firstName.trim().length >= 2 &&
     lastName.trim().length >= 2 &&
     passwordChecks.every((c) => c.met) &&
+    passwordsMatch &&
     !isSubmitting;
 
   const handleSubmit = async (e) => {
@@ -270,6 +274,26 @@ const CandidateSignup = () => {
               </li>
             ))}
           </ul>
+
+          <Field
+            label="Confirm password"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            required
+          />
+          {/* Only speak up once they've actually typed something in the second box —
+              flagging a mismatch on an empty field reads as an error they caused. */}
+          {confirmPassword.length > 0 && (
+            <p
+              className={`text-xs font-proxima flex items-center gap-2 -mt-2 ${passwordsMatch ? 'text-white' : 'text-amber-200'}`}
+              role="status"
+            >
+              <span aria-hidden="true">{passwordsMatch ? '✓' : '○'}</span>
+              {passwordsMatch ? 'Passwords match' : "Passwords don't match yet"}
+            </p>
+          )}
 
           {error && (
             <div className="bg-red-500/20 border border-red-300/40 rounded-xl px-4 py-3">

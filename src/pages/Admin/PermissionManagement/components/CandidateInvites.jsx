@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Ban, UserPlus } from 'lucide-react';
+import { Copy, Ban, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import useAuthStore from '../../../../stores/authStore';
 import { Input } from '../../../../components/ui/input';
@@ -37,7 +37,6 @@ const formatDate = (value) =>
 const CandidateInvites = () => {
   const token = useAuthStore((s) => s.token);
 
-  const [expanded, setExpanded] = useState(false);
   const [invites, setInvites] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -64,11 +63,11 @@ const CandidateInvites = () => {
     }
   }, [token]);
 
-  // Only fetch once the panel is actually opened — this is a rarely-used tool on a page
-  // whose main job is the user table.
+  // The tab only mounts when it's selected, so this fetch is already lazy — the page
+  // lands on User Permissions and never touches /invites until someone switches tabs.
   useEffect(() => {
-    if (expanded) load();
-  }, [expanded, load]);
+    load();
+  }, [load]);
 
   const copyLink = async (url) => {
     try {
@@ -127,28 +126,18 @@ const CandidateInvites = () => {
   };
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 mb-4">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50 transition-colors"
-      >
-        {expanded ? (
-          <ChevronDown className="h-4 w-4 text-slate-400" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-slate-400" />
-        )}
+    <div className="bg-white rounded-lg border border-slate-200">
+      <div className="flex items-center gap-3 p-4 border-b border-slate-200">
         <UserPlus className="h-5 w-5 text-[#4242EA]" />
-        <span className="flex-1">
+        <span>
           <span className="block font-semibold text-slate-900 font-proxima">Candidate Invites</span>
           <span className="block text-sm text-slate-500 font-proxima">
             Give an interview candidate read-only access to the Cohort Hub
           </span>
         </span>
-      </button>
+      </div>
 
-      {expanded && (
-        <div className="border-t border-slate-200 p-4 space-y-5">
+      <div className="p-4 space-y-5">
           <form onSubmit={handleCreate} className="flex flex-wrap items-end gap-3">
             <label className="flex-1 min-w-[240px]">
               <span className="block text-xs font-medium text-slate-500 mb-1 font-proxima">
@@ -276,8 +265,7 @@ const CandidateInvites = () => {
               </TableBody>
             </Table>
           </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 };
