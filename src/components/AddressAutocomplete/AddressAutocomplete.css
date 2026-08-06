@@ -18,7 +18,7 @@
   background-color: #ffffff;
   color: #1E1E1E;
   font-size: 1rem;
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-family);
   box-sizing: border-box;
   transition: border-color 0.2s, box-shadow 0.2s;
 }

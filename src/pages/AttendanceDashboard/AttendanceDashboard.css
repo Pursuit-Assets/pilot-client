@@ -8,7 +8,7 @@
   padding-bottom: 2rem;
   background-color: #EFEFEF;
   color: #1E1E1E;
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
 }
 
 .attendance-dashboard-loading {

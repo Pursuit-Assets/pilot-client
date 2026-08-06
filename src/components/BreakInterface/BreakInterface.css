@@ -18,7 +18,7 @@
 }
 
 .break-interface__heading {
-  font-family: 'Proxima Nova', sans-serif;
+  font-family: var(--font-family);
   font-size: 2.5rem;
   font-weight: 700;
   color: var(--color-carbon-black);
@@ -27,7 +27,7 @@
 }
 
 .break-interface__message {
-  font-family: 'Proxima Nova', sans-serif;
+  font-family: var(--font-family);
   font-size: 1.125rem;
   font-weight: 400;
   color: var(--color-carbon-black);
@@ -52,7 +52,7 @@
 }
 
 .break-interface__hint {
-  font-family: 'Proxima Nova', sans-serif;
+  font-family: var(--font-family);
   font-size: 0.875rem;
   font-weight: 400;
   color: var(--color-carbon-black);

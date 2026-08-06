@@ -59,7 +59,7 @@
   background: white;
   color: var(--color-carbon-black);
   font-size: 0.95rem;
-  font-family: 'Proxima Nova', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-family);
   resize: vertical;
   min-height: 80px;
   transition: all 0.2s ease;

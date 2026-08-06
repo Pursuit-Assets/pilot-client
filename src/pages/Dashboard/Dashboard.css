@@ -132,7 +132,7 @@
   letter-spacing: 0.005em;
   color: var(--color-carbon-black);
   margin: 0 0 8px 0;
-  font-family: "Proxima Nova Bold";
+  font-family: var(--font-family-bold);
 }
 
 .dashboard__goal-text {
@@ -264,7 +264,7 @@
 
 .dashboard__week-label {
   color: var(--color-carbon-black);
-  font-family: "Proxima Nova Bold";
+  font-family: var(--font-family-bold);
 }
 
 .dashboard__week-level {
@@ -375,7 +375,7 @@
 }
 
 .dashboard__day-date > strong{
-  font-family: "Proxima Nova Bold";
+  font-family: var(--font-family-bold);
 }
 
 .dashboard__day-card--today .dashboard__day-date {
@@ -470,7 +470,7 @@
 
 /* Task Title */
 .dashboard__task-title {
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
   font-weight: 400;
   font-size: 15px;
   line-height: 16px;
@@ -1120,7 +1120,7 @@
 }
 
 .dashboard__countdown-number {
-  font-family: 'Proxima Nova', sans-serif;
+  font-family: var(--font-family);
   font-size: 120px;
   font-weight: 700;
   color: var(--color-pursuit-purple);
@@ -1128,7 +1128,7 @@
 }
 
 .dashboard__countdown-label {
-  font-family: 'Proxima Nova', sans-serif;
+  font-family: var(--font-family);
   font-size: 24px;
   color: var(--color-carbon-black);
   margin-top: 10px;
