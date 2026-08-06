@@ -4,7 +4,7 @@
     display: flex;
     flex-direction: column;
     background-color: #EFEFEF;
-    font-family: var(--font-family, 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+    font-family: var(--font-family);
     color: #1E1E1E;
 }
 

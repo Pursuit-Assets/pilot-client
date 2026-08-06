@@ -126,7 +126,7 @@ const AdminDashboard = () => {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+              <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'var(--font-family)' }}>
                 Cohort Hub
               </h1>
               {/* Interview candidates read this dashboard for their exercise. The server

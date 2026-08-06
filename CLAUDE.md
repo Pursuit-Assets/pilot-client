@@ -317,11 +317,29 @@ The V2 Coach APPLY-phase deliverable panel (`src/pages/Learning/components/Deliv
 
 ## Design System
 
-- **Font**: Proxima Nova
+- **Font**: Proxima Nova — see **Fonts** below before writing any `font-family`
 - **Colors**: Pursuit Purple `#4242EA`, Carbon Black `#1E1E1E`, Stardust `#E3E3E3`, Mastery Pink `#FF33FF`
 - **CSS**: Tailwind utilities + CSS variables in `:root` (index.css)
 - **Components**: shadcn/ui (Button, Input, Dialog, Select, Tabs, Card, Badge, etc.)
 - **Path alias**: `@/*` → `./src/*`
+
+### Fonts — the Typekit family name is `proxima-nova`, not `'Proxima Nova'` (fixed 2026-08-05)
+
+**Never write a Proxima stack by hand. Use `var(--font-family)` or `var(--font-family-bold)`** (defined in `src/index.css`; Tailwind's `sans` carries the same stack, so plain `font-sans`/default body text is already correct).
+
+The Adobe Fonts kit linked in `index.html` (`use.typekit.net/opu3kar.css`) registers the family as **`proxima-nova`** — lowercase, hyphenated. CSS family matching is case-insensitive but **not** whitespace- or hyphen-insensitive, so `'Proxima Nova'` does not match it. Every stack in the app asked for `'Proxima Nova'` from inception until 2026-08-05, which meant **the paid kit was downloaded on every page load and used by nothing**: text resolved to a local 216-glyph, weight-400-only subset, and all ~3,300 uses of weight 500/600/700 (1,176 `font-semibold`, 972 `font-medium`, 417 `font-bold`, plus ~730 CSS declarations) were **synthesized by the browser**. Chrome and Safari synthesize differently — measured in their real engines, weight 600 rendered 277.17px in Chromium vs 291.6px in WebKit on the same 13-character string. That 14.4px gap was the "fonts look different in Safari" bug. Post-fix the two engines agree to 0.01px at every weight.
+
+Three things are load-bearing and each has a named test in `src/__tests__/fontWiring.test.js`:
+
+1. **`proxima-nova` comes first** in `--font-family`, `--font-family-bold`, and `tailwind.config.js`'s `sans`. `'Proxima Nova'` stays as the second entry — it's the local subset, an offline fallback that is never fetched while the kit loads.
+2. **The `'Proxima Nova Bold'` `@font-face` declares `font-weight: 700`.** Omitting it registers the face at 400, so the ~82 call sites that set *both* `.font-proxima-bold` and `font-bold`/`font-semibold` asked 700 of a "400" family and got synthetic bold smeared over an already-bold face (299.04px WebKit vs 284.61px Chromium — the app's worst divergence). This face is now served from the licensed `src/assets/fonts/Proxima Nova Bold.woff`, which sat unreferenced in the repo while the bold was hotlinked from `db.onlinewebfonts.com`, an unlicensed third-party CDN.
+3. **`.font-proxima-bold` sets no `font-weight`.** It's emitted *after* Tailwind's weight utilities at equal specificity (offset ~106.5k vs ~77.2k in the built CSS), so a `font-weight` there would silently override an element's explicit `font-medium`. Keeping `'Proxima Nova Bold'` a separate 700-only family means all 611 call sites — the ~529 with no weight and the ~82 with one — select the same real face with zero synthesis, independent of emission order. **Do not "simplify" this into `--font-family` + `font-weight: 700` on the class.**
+
+**The kit has no 600.** Weights are 100/300/400/400i/500/700/700i/800/900, so `font-semibold` (600) resolves *up* to the real 700 per the CSS font-matching algorithm (verified: 600 and 700 both render 284.53px). That is intended — do not add a synthetic 600.
+
+Two files deliberately keep a literal `'Proxima Nova'` and are whitelisted in the test: `ContentPreview.jsx` (pptxgenjs `fontFace` is an **OS** font name resolved by PowerPoint on the viewer's machine) and `CoachV2FlowDiagram.jsx` (mermaid uses `fontFamily` for SVG label width measurement, so it needs a resolvable family list, not a custom property — `proxima-nova` is prepended to the literal instead).
+
+Unrelated but confirmed while investigating: autoprefixer **does** add `-webkit-background-clip` automatically (the hand-prefixing at ~17 sites is redundant), and **does not** add `-webkit-backdrop-filter` — with no `browserslist` in `package.json` its default targets are Safari ≥18, which supports it unprefixed. The 11 bare `backdrop-filter` sites therefore lose their blur on **Safari ≤17 only**.
 
 ## Key Architectural Patterns
 

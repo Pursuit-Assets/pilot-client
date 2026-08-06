@@ -95,7 +95,7 @@ const Card = ({ id, option, title, answers, footnote, children }) => (
   <section id={id} className="bg-white rounded-lg border border-[#E3E3E3] p-6 scroll-mt-24">
     <div className="flex items-baseline gap-3 mb-1">
       <span className="text-xs font-bold uppercase tracking-wide text-[#4242EA]">{option}</span>
-      <h2 className="text-lg font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+      <h2 className="text-lg font-bold text-[#1E1E1E]" style={{ fontFamily: 'var(--font-family)' }}>
         {title}
       </h2>
     </div>
@@ -295,7 +295,7 @@ const DailyAttendanceModal = ({ day, onClose }) => {
       <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-1">
           <div>
-            <h3 className="text-lg font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+            <h3 className="text-lg font-bold text-[#1E1E1E]" style={{ fontFamily: 'var(--font-family)' }}>
               {day.day}, {day.date} — {day.rate}% attendance
             </h3>
             <p className="text-sm text-slate-500">
@@ -607,7 +607,7 @@ const AttendanceVizLab = () => {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+              <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'var(--font-family)' }}>
                 Attendance Viz Lab
               </h1>
               <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">

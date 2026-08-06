@@ -1,9 +1,28 @@
 /* Dashboard - Figma Design Implementation */
 /* Using BEM naming conventions */
-/* Font: Inter (Proxima Nova alternative) */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* FONTS — read this before touching a font-family anywhere in this app.
+ *
+ * Real Proxima Nova weights come from the Adobe Fonts (Typekit) kit loaded in
+ * index.html. That kit registers the family as `proxima-nova` — lowercase and
+ * hyphenated. CSS family matching is case-insensitive but NOT whitespace- or
+ * hyphen-insensitive, so `'Proxima Nova'` does NOT match it. Every stack in
+ * this app asked for `'Proxima Nova'` until 2026-08-05, which meant the kit
+ * was downloaded on every page load and used by nothing: text resolved to the
+ * local 400-only subset below and every 500/600/700 was FAKED by the browser.
+ * Chrome and Safari synthesize bold differently, which is why the same page
+ * looked different in the two browsers.
+ *
+ * So: `proxima-nova` must come FIRST in every stack. Use the two variables
+ * below rather than writing a stack by hand.
+ *
+ * The kit provides 100/300/400/400i/500/700/700i/800/900 — there is NO 600.
+ * `font-semibold` (600) therefore resolves UP to the real 700 per the CSS
+ * font-matching algorithm. That is intended; do not add a fake 600.
+ */
 
+/* Offline fallback for the kit only: 216-glyph subset, weight 400. While the
+ * kit loads, `proxima-nova` matches first and this face is never fetched. */
 @font-face {
   font-family: 'Proxima Nova';
   src: url('./assets/fonts/Proxima Nova Regular.woff2') format('woff2');
@@ -12,15 +31,32 @@
   font-display: swap;
 }
 
-
+/* Bold-only family behind --font-family-bold / .font-proxima-bold.
+ *
+ * `font-weight: 700` is load-bearing. Omitting it (as this rule did until
+ * 2026-08-05) registers the face at 400, so any element setting BOTH
+ * .font-proxima-bold and font-bold/font-semibold asked 700 of a "400" family
+ * and got synthetic bold smeared on top of an already-bold face — the app's
+ * single worst Chrome/Safari divergence.
+ *
+ * Keeping this a separate 700-only family is deliberate: .font-proxima-bold
+ * (611 call sites) can then set NO weight of its own, so the ~529 sites that
+ * pass no weight and the ~82 that pass font-medium/semibold/bold all select
+ * this one real face with zero synthesis, independent of Tailwind's utility
+ * emission order. Do not "simplify" this into --font-family + font-weight:700
+ * on the class: .font-proxima-bold is emitted AFTER Tailwind's weight
+ * utilities at equal specificity, so it would silently override an element's
+ * explicit font-medium.
+ *
+ * Was hotlinked from db.onlinewebfonts.com (unlicensed third-party CDN) while
+ * this licensed file sat unreferenced in the repo. Now served locally.
+ */
 @font-face {
-  font-family: "Proxima Nova Bold";
-  src: url("https://db.onlinewebfonts.com/t/72b6f2c9990bd3d37b8013a59ed78902.eot");
-  src: url("https://db.onlinewebfonts.com/t/72b6f2c9990bd3d37b8013a59ed78902.eot?#iefix")format("embedded-opentype"),
-  url("https://db.onlinewebfonts.com/t/72b6f2c9990bd3d37b8013a59ed78902.woff2")format("woff2"),
-  url("https://db.onlinewebfonts.com/t/72b6f2c9990bd3d37b8013a59ed78902.woff")format("woff"),
-  url("https://db.onlinewebfonts.com/t/72b6f2c9990bd3d37b8013a59ed78902.ttf")format("truetype"),
-  url("https://db.onlinewebfonts.com/t/72b6f2c9990bd3d37b8013a59ed78902.svg#Proxima Nova Bold")format("svg");
+  font-family: 'Proxima Nova Bold';
+  src: url('./assets/fonts/Proxima Nova Bold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
 }
 
 
@@ -33,8 +69,11 @@
   --color-white: #FFFFFF;
   --color-divider: #C8C8C8;
   --color-mastery-pink: #FF33FF;
-  --font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
-  --font-family-bold: 'Proxima Nova Bold', 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  /* Canonical font stacks — the ONLY two places a Proxima stack is spelled out.
+   * Reference these (var(--font-family) / var(--font-family-bold)) instead of
+   * hardcoding a stack, so the kit family name can never drift out of sync. */
+  --font-family: proxima-nova, 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  --font-family-bold: 'Proxima Nova Bold', proxima-nova, 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
 }
 
 @tailwind base;
@@ -148,7 +187,7 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: var(--font-family);
     font-weight: 700;
     font-size: 16px;
     color: #FFFFFF;
@@ -359,7 +398,7 @@
 body {
   background-color: #EFEFEF;
   color: hsl(var(--foreground));
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-family);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

@@ -51,7 +51,7 @@
 }
 
 .missed-assignments-sidebar__title {
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
   font-style: normal;
   font-weight: 500;
   font-size: 14px;
@@ -69,7 +69,7 @@
 }
 
 .missed-assignments-sidebar__subtitle {
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
   font-style: normal;
   font-weight: 700;
   font-size: 28px;
@@ -101,7 +101,7 @@
   padding: 20px;
   text-align: center;
   color: #1E1E1E;
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
 }
 
 .missed-assignments-sidebar__list {
@@ -128,7 +128,7 @@
 }
 
 .missed-assignments-sidebar__date {
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
   font-style: normal;
   font-weight: 700;
   font-size: 16px;
@@ -139,7 +139,7 @@
 }
 
 .missed-assignments-sidebar__task-title {
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
   font-style: normal;
   font-weight: 400;
   font-size: 16px;
@@ -158,7 +158,7 @@
   background: #EFEFEF;
   border: 1px solid #FF33FF;
   border-radius: 100px;
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
   font-style: normal;
   font-weight: 400;
   font-size: 16px;

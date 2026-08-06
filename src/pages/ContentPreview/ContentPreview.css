@@ -1,5 +1,5 @@
 .content-preview-container {
-  font-family: 'Proxima Nova', sans-serif;
+  font-family: var(--font-family);
 }
 
 .preview-banner {

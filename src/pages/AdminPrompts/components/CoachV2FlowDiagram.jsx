@@ -69,7 +69,11 @@ export default function CoachV2FlowDiagram() {
           mermaid.initialize({
             startOnLoad: false,
             theme: 'base',
-            fontFamily: '"Proxima Nova", "Helvetica Neue", Arial, sans-serif',
+            // Literal stack, not var(--font-family): mermaid also uses this
+            // value to measure label widths, so it must be a resolvable family
+            // list rather than a custom property. 'proxima-nova' (the Typekit
+            // family name) must stay first — see src/index.css.
+            fontFamily: 'proxima-nova, "Proxima Nova", "Helvetica Neue", Arial, sans-serif',
             securityLevel: 'strict',
             // Mermaid renders into a scratch <div id="d{id}"> appended to
             // document.body, then removes it. On a render failure it instead
