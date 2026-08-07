@@ -257,6 +257,29 @@ Every ReactMarkdown surface gets its `code` + `pre` renderers from the shared **
 
 Consequence for CSS: the fenced-block styling now belongs on the **`pre`**, not the inner `code` (`SummaryModal.css`'s `.summary-modal__code-block` moved accordingly). The `@tailwindcss/typography` `prose` plugin is NOT installed — style markdown elements explicitly.
 
+## Payments Admin — Job Outcomes is API-only, and must stay that way (2026-08-06)
+
+`pages/PaymentAdmin/components/JobOutcomesTab/` and the Executive Summary in `components/MetricsDashboard.jsx` render **alumni salaries, bond invoice amounts and repayment plans for named individuals**. Every one of those values comes from `/api/job-outcomes/*`. **Do not add a bundled fallback, fixture, or "mock mode" to this surface** — an outage here must render an error, not a stale copy of real financial records.
+
+It shipped the other way first. Four files carried the data as hardcoded JS: `bondData.js` (3,370 lines, **115 named alumni** with employers, salaries, monthly/total bond invoices, payments-to-date and layoff history), `mockData.js` (its aggregation layer), `BondStatus.jsx` (13 named fellows with invoice amounts and payment methods), `InvoiceActivityTimeline.jsx` (never imported — dead code that still shipped names), and `MetricsDashboard.jsx` (`WEEKLY_HIGHLIGHTS` + `UPCOMING_BOND_COMPLETE`). All of it was in the browser bundle, served to anyone who could fetch the chunk regardless of `page:payment_admin`, and in every clone of the repo. All five are deleted; the data now lives in `alumni_outcomes` / `alumni_affiliations` / `alumni_bond_*` (see test-pilot-server CLAUDE.md → Alumni bond tables).
+
+Endpoints and their consumers:
+
+| Endpoint | Renders |
+|---|---|
+| `/overview`, `/alumni`, `/employers`, `/cohorts`, `/sync/status` | `JobOutcomesTab` tabs (pre-existing) |
+| `/invoice-queue` | `BondStatus` — the start/stop ops queue |
+| `/salary-jobs` | `SalaryAnalysis` — one row per JOB, since every distribution there is over jobs, not people |
+| `/exec-summary` | `MetricsDashboard` Executive Summary |
+
+Three things are load-bearing:
+
+1. **`BondStatus` groups by whatever months the queue returns.** Sections are derived (`start`/`stop` × `effective_month`), not the old hardcoded "July" / "Heads up — August" headings, so a new month needs no code change.
+2. **The Executive Summary is derived, not curated.** The headline sentence, the Pursuit-Managed active list, the pipeline table and the YTD enrolment counts are all computed server-side from the invoice queue. The hand-maintained version had already drifted — it claimed 4 Pursuit-Managed enrolments when the queue held 5.
+3. **Month labels are parsed as UTC.** `effective_month` is a `YYYY-MM-DD` string; `new Date('2026-08-01')` is midnight UTC and renders as **July 31** in any negative-offset timezone, which would put the wrong month in the heading for every US user. Both `BondStatus.fmtMonth` and `MetricsDashboard.monthLabel` build via `Date.UTC` + `timeZone: 'UTC'`.
+
+`SalaryAnalysis` takes a `cohort` prop and refetches on change; its cohort chart relies on the **server's** ordering (the stored label is `"Cohort 10"`, which does not sort correctly as a string) — do not re-sort client-side.
+
 ## Platform Intake
 
 `src/pages/PlatformIntake/PlatformIntake.jsx` — form for reporting bugs and requesting features. Submissions go to `POST /api/platform-intake` on test-pilot-server, which also forwards them to pursuit-factory (`POST /api/intake`) to create tickets in the Kanban system.

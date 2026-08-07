@@ -591,7 +591,10 @@ const V2CoachEngineTab = ({ showNotification, reloadPrompts, canEdit }) => {
               <div className="flex items-center gap-2 mb-4">
                 <MessageSquare className="h-5 w-5 text-[#4242EA]" />
                 <h3 className="font-proxima-bold text-xl text-[#1E1E1E]">
-                  Legacy flow{onboardingRedesign && !onboardingRedesign.enabled ? '' : onboardingRedesign ? ' (inactive)' : ''}
+                  {/* Exact mirror of the Redesigned heading above: whichever flow is not serving
+                      builders is the one marked inactive. Optional chaining covers the old-backend
+                      case (no knob in the payload), where neither heading gets a marker. */}
+                  Legacy flow{onboardingRedesign?.enabled ? ' (inactive)' : ''}
                 </h3>
                 <InfoTip text="The original Day-0 onboarding chat: 9 conversational anchors, no taste test, no stage tracking. Kept intact so the flow switch above is an instant rollback." />
               </div>

@@ -15,26 +15,24 @@ const fmt$Precise = (n) => n == null ? '—' : new Intl.NumberFormat('en-US', { 
 const fmtPct = (n) => n == null ? '—' : `${n}%`;
 const toInputDate = (d) => d.toISOString().slice(0, 10);
 
-// ─── Upcoming Bond Complete (curated V1) ───────────────────────────────────────
-// Fellows expected to reach Bond Complete within the next 3 months.
-const UPCOMING_BOND_COMPLETE = [
-  {
-    fellowName: 'Isaiah Collazo',
-    remainingAmount: 1240,
-    monthlyPayment: 1000,
-    planEstablished: '2025-02',
-    path: 'payment_plan',
-    detail: 'Payment plan · $1,000/mo · established Feb 2025',
-  },
-  {
-    fellowName: 'Joshuel Marte',
-    invoicesSent: 45,
-    invoicesToComplete: 48,
-    invoiceAmount: 1125,
-    path: 'invoice_count',
-    detail: '45 of 48 invoices · $1,125 each',
-  },
-];
+// ─── Upcoming Bond Complete ───────────────────────────────────────────────────
+// Fellows expected to reach Bond Complete within the next 3 months. The list itself
+// comes from GET /api/job-outcomes/exec-summary — it names real people and their
+// outstanding balances, so it is not carried in the bundle.
+//
+// Rows arrive snake_case from the API; normalizeCompletion maps them to the camelCase
+// shape the projection helpers below already expect.
+const normalizeCompletion = (row) => ({
+  fellowName: row.fellow_name,
+  path: row.completion_path,
+  remainingAmount: row.remaining_amount,
+  monthlyPayment: row.monthly_payment,
+  planEstablished: row.plan_established,
+  invoicesSent: row.invoices_sent,
+  invoicesToComplete: row.invoices_to_complete,
+  invoiceAmount: row.invoice_amount,
+  detail: row.detail,
+});
 
 function monthsUntilBondComplete(entry, asOf = new Date()) {
   if (entry.path === 'payment_plan') {
@@ -56,8 +54,8 @@ function remainingAmountForEntry(entry) {
   return null;
 }
 
-function getUpcomingBondComplete(asOf = new Date(), withinMonths = 3) {
-  return UPCOMING_BOND_COMPLETE
+function getUpcomingBondComplete(entries = [], asOf = new Date(), withinMonths = 3) {
+  return entries
     .map((entry) => {
       const monthsRemaining = monthsUntilBondComplete(entry, asOf);
       return {
@@ -79,34 +77,36 @@ function formatEtaLabel(monthsRemaining) {
 // Curated V1: no one is currently on pause — ignore Sheet-driven list.
 const CURATED_PAUSE_WATCHLIST = [];
 
-// Curated weekly highlights for Executive Summary (ops narrative; not API-driven).
-const WEEKLY_HIGHLIGHTS = {
-  headline: 'Rajiv Sukhnandan has agreed to pay via Direct Deposit.',
+// Explanatory copy for the two repayment methods. This is program narrative, not
+// per-person data, so it stays in the component — but the enrolment COUNTS and the
+// name lists beside it are read from the API (they were hardcoded, which both leaked
+// fellows' repayment details into the bundle and left the counts to go stale: the
+// Pursuit-Managed figure said 4 when the queue already held 5).
+const PAYMENT_METHOD_COPY = {
   methodsIntro:
     'To improve long-term payment compliance, we recently introduced two new repayment methods that move payments closer to the source of income.',
   methods: [
     {
       title: 'Pursuit-Managed Payments',
+      // Matches alumni_invoice_actions.payment_method, which is how the count is joined.
+      methodKey: 'Pursuit Managed',
       body: 'For Builders paid through Pursuit PBC, Good Job Agreement payments are withheld during the payment process and routed directly to Pursuit.org.',
-      ytdEnrolled: 4,
     },
     {
       title: 'Direct Deposit',
+      methodKey: 'Direct Deposit',
       body: 'For Fellows and Builders not paid through Pursuit PBC, direct deposit is now the preferred repayment method, providing a simpler, Builder-controlled payment experience.',
-      ytdEnrolled: 2,
     },
   ],
-  pursuitManagedActive: [
-    { name: 'Ariel Chen', detail: '$1,297.20 in July' },
-    { name: 'Kelvin Saldana', detail: '$1,297.20 in July' },
-    { name: 'Jacob Williams', detail: '$350/mo payment plan' },
-  ],
-  augustPipeline: [
-    { name: 'Kalila Green', amount: 1093.75, method: 'Direct Deposit', notes: 'New job — direct deposit set up; begin August 2026' },
-    { name: 'Ethan Davey', amount: 1062.5, method: 'Pursuit Managed', notes: 'New job — Pursuit managed; begin August 2026' },
-    { name: 'Daniel Chillemi', amount: 350, method: 'Pursuit Managed', notes: 'Payment plan: $350/mo × 6 months, then $1,800/mo × 6 months to catch up; begin August 2026' },
-    { name: 'Rajiv Sukhnandan', amount: 1100, method: 'Direct Deposit', notes: 'New job — direct deposit set up; begin August 2026' },
-  ],
+};
+
+const monthLabel = (ym) => {
+  if (!ym) return '';
+  const [y, m] = ym.split('-');
+  // Built in UTC: `new Date('2026-08-01')` is midnight UTC and renders as July 31 in any
+  // negative-offset timezone, which would put the wrong month in the heading.
+  return new Date(Date.UTC(Number(y), Number(m) - 1, 1))
+    .toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' });
 };
 
 // ─── Preset ranges ────────────────────────────────────────────────────────────
@@ -480,6 +480,9 @@ const MetricsDashboard = () => {
   const [error, setError] = useState('');
   // Always-on Past Week snapshot for Executive Summary (independent of filter presets)
   const [weekSnap, setWeekSnap] = useState(null);
+  // Executive-summary highlights: repayment-method enrolments, the invoice pipeline and
+  // the bond-completion watchlist. Server-derived from the invoice queue.
+  const [execSummary, setExecSummary] = useState(null);
 
   // Compliance Lists (Not Compliant / At Risk / Compliant) state
   const [ncMonth, setNcMonth] = useState(() => {
@@ -532,6 +535,17 @@ const MetricsDashboard = () => {
       });
     return () => { cancelled = true; };
   }, [fetchMetricsRange]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${import.meta.env.VITE_API_URL}/api/job-outcomes/exec-summary`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((s) => { if (!cancelled) setExecSummary(s); })
+      .catch(() => { if (!cancelled) setExecSummary(null); });
+    return () => { cancelled = true; };
+  }, [token]);
 
   // Fetch compliance lists on mount + whenever month changes (powers tab badge too)
   useEffect(() => {
@@ -691,69 +705,81 @@ const MetricsDashboard = () => {
                 <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide">Highlights — Last Week</h3>
-                    <p className="text-sm text-gray-700 mt-2">{WEEKLY_HIGHLIGHTS.headline}</p>
+                    {execSummary?.headline && (
+                      <p className="text-sm text-gray-700 mt-2">{execSummary.headline}</p>
+                    )}
                   </div>
 
                   <div>
                     <h4 className="text-sm font-semibold text-gray-800 mb-1">Payment Operations</h4>
-                    <p className="text-sm text-gray-600 mb-3">{WEEKLY_HIGHLIGHTS.methodsIntro}</p>
+                    <p className="text-sm text-gray-600 mb-3">{PAYMENT_METHOD_COPY.methodsIntro}</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {WEEKLY_HIGHLIGHTS.methods.map((method) => (
+                      {PAYMENT_METHOD_COPY.methods.map((method) => (
                         <div key={method.title} className="rounded-lg border border-gray-100 bg-gray-50 p-4">
                           <p className="text-sm font-semibold text-gray-900">{method.title}</p>
                           <p className="text-sm text-gray-600 mt-1">{method.body}</p>
-                          <p className="text-xs font-medium text-[#4242EA] mt-2">YTD: {method.ytdEnrolled} Builders enrolled.</p>
+                          {execSummary && (
+                            <p className="text-xs font-medium text-[#4242EA] mt-2">
+                              YTD: {execSummary.ytdEnrolledByMethod?.[method.methodKey] ?? 0} Builders enrolled.
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Pursuit-Managed (active)</h4>
-                    <ul className="text-sm text-gray-700 space-y-1">
-                      {WEEKLY_HIGHLIGHTS.pursuitManagedActive.map((row) => (
-                        <li key={row.name}>
-                          <span className="font-medium text-gray-900">{row.name}</span>
-                          <span className="text-gray-500"> — {row.detail}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  {!!execSummary?.pursuitManagedActive?.length && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-800 mb-2">Pursuit-Managed (active)</h4>
+                      <ul className="text-sm text-gray-700 space-y-1">
+                        {execSummary.pursuitManagedActive.map((row) => (
+                          <li key={row.fellow_name}>
+                            <span className="font-medium text-gray-900">{row.fellow_name}</span>
+                            <span className="text-gray-500"> — {row.notes}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
-                  <div>
-                    <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
-                      <h4 className="text-sm font-semibold text-gray-800">Start invoicing in August</h4>
-                      <p className="text-xs text-gray-500">
-                        Pipeline total:{' '}
-                        <span className="font-semibold text-gray-800">
-                          {fmt$Precise(WEEKLY_HIGHLIGHTS.augustPipeline.reduce((s, r) => s + (r.amount || 0), 0))}
-                        </span>
-                        /mo
-                      </p>
-                    </div>
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-                          <tr>
-                            <th className="text-left font-medium px-3 py-2">Name</th>
-                            <th className="text-right font-medium px-3 py-2">Monthly Amount</th>
-                            <th className="text-left font-medium px-3 py-2">Payment Method</th>
-                            <th className="text-left font-medium px-3 py-2">Notes</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {WEEKLY_HIGHLIGHTS.augustPipeline.map((row) => (
-                            <tr key={row.name} className="border-t border-gray-100">
-                              <td className="px-3 py-2 font-medium text-gray-900">{row.name}</td>
-                              <td className="px-3 py-2 text-right text-gray-800">{fmt$Precise(row.amount)}</td>
-                              <td className="px-3 py-2 text-gray-700">{row.method}</td>
-                              <td className="px-3 py-2 text-gray-500">{row.notes}</td>
+                  {!!execSummary?.pipeline?.length && (
+                    <div>
+                      <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                        <h4 className="text-sm font-semibold text-gray-800">
+                          Start invoicing in {monthLabel(execSummary.pipelineMonth)}
+                        </h4>
+                        <p className="text-xs text-gray-500">
+                          Pipeline total:{' '}
+                          <span className="font-semibold text-gray-800">
+                            {fmt$Precise(execSummary.pipeline.reduce((s, r) => s + (r.monthly_amount || 0), 0))}
+                          </span>
+                          /mo
+                        </p>
+                      </div>
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                            <tr>
+                              <th className="text-left font-medium px-3 py-2">Name</th>
+                              <th className="text-right font-medium px-3 py-2">Monthly Amount</th>
+                              <th className="text-left font-medium px-3 py-2">Payment Method</th>
+                              <th className="text-left font-medium px-3 py-2">Notes</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {execSummary.pipeline.map((row) => (
+                              <tr key={row.fellow_name} className="border-t border-gray-100">
+                                <td className="px-3 py-2 font-medium text-gray-900">{row.fellow_name}</td>
+                                <td className="px-3 py-2 text-right text-gray-800">{fmt$Precise(row.monthly_amount)}</td>
+                                <td className="px-3 py-2 text-gray-700">{row.payment_method}</td>
+                                <td className="px-3 py-2 text-gray-500">{row.notes}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* KPI cards */}
@@ -932,9 +958,11 @@ const MetricsDashboard = () => {
                   )}
                 </div>
 
-                {/* Upcoming Bond Complete (curated V1 · within 3 months) */}
+                {/* Upcoming Bond Complete (within 3 months) */}
                 {(() => {
-                  const upcomingBondComplete = getUpcomingBondComplete();
+                  const upcomingBondComplete = getUpcomingBondComplete(
+                    (execSummary?.upcomingBondComplete || []).map(normalizeCompletion)
+                  );
                   return (
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 overflow-hidden">
                       <div className="px-4 py-3 border-b border-emerald-100 flex items-center gap-2 flex-wrap">

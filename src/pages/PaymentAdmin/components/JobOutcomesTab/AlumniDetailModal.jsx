@@ -3,7 +3,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../../co
 import { Card, CardContent } from '../../../../components/ui/card';
 import { Badge } from '../../../../components/ui/badge';
 import useAuthStore from '../../../../stores/authStore';
-import { buildAlumniDetail } from './mockData';
 import { Briefcase, CheckCircle, TrendingUp, DollarSign } from 'lucide-react';
 
 const formatCurrency = (n) => {
@@ -24,11 +23,6 @@ const AlumniDetailModal = ({ contactId, open, onClose }) => {
   useEffect(() => {
     if (!open || !contactId) {
       setDetail(null);
-      return;
-    }
-    // Sheet-based fallback: ids start with "local-"
-    if (String(contactId).startsWith('local-')) {
-      setDetail(buildAlumniDetail(contactId));
       return;
     }
     setIsLoading(true);

@@ -764,22 +764,39 @@ const ApplicationsTab = ({
   }, [cohorts]);
 
   const handleMoveSelectedToCohort = useCallback(async () => {
-    if (selectedApplicants.length === 0 || !targetCohortId) return;
+    if (selectedApplicants.length === 0 || !targetCohortId || movingCohort) return;
+
+    // Claimed BEFORE the dialog opens, not after it resolves. The Move button is only disabled on
+    // this flag, so setting it afterwards left the button live for as long as the prompt was up —
+    // a double-click stacked a second dialog on the same selection and fired the move twice.
+    setMovingCohort(true);
 
     // A bulk move is how 13 already-decided applicants landed in the actively-recruiting cohort
     // on 2026-07-07 with nothing recorded about who or why. Every move is now audited, and the
     // server refuses to move an applicant whose admission decision is final without a reason.
-    const { value: reason, isConfirmed } = await Swal.fire({
-      title: `Move ${selectedApplicants.length} applicant${selectedApplicants.length === 1 ? '' : 's'} to ${cohortNameMap[targetCohortId] || 'this cohort'}?`,
-      input: 'text',
-      inputLabel: 'Reason for the move (recorded in the audit trail)',
-      inputPlaceholder: 'e.g. applied to the wrong cycle by mistake',
-      showCancelButton: true,
-      confirmButtonText: 'Move applicants'
-    });
-    if (!isConfirmed) return;
+    let reason;
+    try {
+      const result = await Swal.fire({
+        title: `Move ${selectedApplicants.length} applicant${selectedApplicants.length === 1 ? '' : 's'} to ${cohortNameMap[targetCohortId] || 'this cohort'}?`,
+        input: 'text',
+        inputLabel: 'Reason for the move (recorded in the audit trail)',
+        inputPlaceholder: 'e.g. applied to the wrong cycle by mistake',
+        showCancelButton: true,
+        confirmButtonText: 'Move applicants'
+      });
+      if (!result.isConfirmed) {
+        setMovingCohort(false);
+        return;
+      }
+      reason = result.value;
+    } catch (error) {
+      // A dialog that never resolves normally (dismissed programmatically) must not strand the
+      // button disabled forever.
+      console.error('Cohort move prompt failed:', error);
+      setMovingCohort(false);
+      return;
+    }
 
-    setMovingCohort(true);
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/admissions/bulk-actions`, {
         method: 'POST',
@@ -853,7 +870,7 @@ const ApplicationsTab = ({
     } finally {
       setMovingCohort(false);
     }
-  }, [selectedApplicants, targetCohortId, token, fetchApplications, setSelectedApplicants, cohortNameMap]);
+  }, [selectedApplicants, targetCohortId, movingCohort, token, fetchApplications, setSelectedApplicants, cohortNameMap]);
   
   // Handle navigating to applicant detail
   const handleViewApplication = useCallback((applicantId) => {

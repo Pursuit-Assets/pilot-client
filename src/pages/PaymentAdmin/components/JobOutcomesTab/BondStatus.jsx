@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../../components/ui/table';
+import useAuthStore from '../../../../stores/authStore';
 import { Ban, CheckCircle2, PlayCircle } from 'lucide-react';
 
 const fmtCurrency = (n) => {
@@ -13,28 +14,15 @@ const fmtCurrency = (n) => {
   }).format(n);
 };
 
-// Curated Invoice Activity (ops queue) — July / August 2026
-const NEW_INVOICES_JULY = [
-  { name: 'Josue Villalona', amount: 1312.5, method: 'Bill.com', notes: 'New job — first invoice July 2026' },
-  { name: 'Edwin Codrington', amount: 1312.5, method: 'Bill.com', notes: 'Off pause — reinstate at regular amount' },
-  { name: 'Destiny Joyner', amount: 1062.5, method: 'Bill.com', notes: 'Off pause — reinstate at regular amount' },
-  { name: 'Ariel Chen', amount: null, method: 'Pursuit Managed', notes: 'Amount based on July paycheck; Pursuit collects directly' },
-  { name: 'Kelvin Saldana', amount: null, method: 'Pursuit Managed', notes: 'Amount based on July paycheck; Pursuit collects directly' },
-  { name: 'Jacob Williams', amount: 350, method: 'Pursuit Managed', notes: 'Payment plan: $350/mo for July & August — total invoice amount based on July paycheck; Pursuit collects directly' },
-];
-
-const NEW_INVOICES_AUGUST = [
-  { name: 'Kalila Green', amount: 1093.75, method: 'Direct Deposit', notes: 'New job — direct deposit set up; begin August 2026' },
-  { name: 'Ethan Davey', amount: 1062.5, method: 'Pursuit Managed', notes: 'New job — Pursuit managed; begin August 2026' },
-  { name: 'Daniel Chillemi', amount: 350, method: 'Pursuit Managed', notes: 'Payment plan: $350/mo × 6 months, then $1,800/mo × 6 months to catch up; begin August 2026' },
-  { name: 'Rajiv Sukhnandan', amount: 1100, method: 'Direct Deposit', notes: 'New job — direct deposit set up; begin August 2026' },
-];
-
-const STOP_INVOICING = [
-  { name: 'Anthony Cannonier', amount: 1125, method: 'Unemployed', notes: 'Pause until re-employed — do not invoice · job loss July' },
-  { name: 'Zane Ahmed', amount: 1125, method: 'Unemployed', notes: 'Pause until re-employed — do not invoice · job loss July' },
-  { name: 'Raymond Udeogu', amount: 1000, method: 'Unemployed', notes: 'Informed in July (need to confirm exact dates) — remove from August invoicing list' },
-];
+// effective_month is a plain YYYY-MM-DD string from the API. Parsed as UTC deliberately:
+// `new Date('2026-08-01')` is midnight UTC, which in any negative-offset timezone renders
+// as July 31 — the header would name the wrong month for every US user.
+const fmtMonth = (iso) => {
+  if (!iso) return '';
+  const [y, m] = iso.split('-');
+  return new Date(Date.UTC(Number(y), Number(m) - 1, 1))
+    .toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+};
 
 const InvoiceTable = ({ rows }) => (
   <div className="border rounded-lg overflow-hidden">
@@ -49,10 +37,10 @@ const InvoiceTable = ({ rows }) => (
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
-          <TableRow key={row.name}>
-            <TableCell className="font-medium">{row.name}</TableCell>
-            <TableCell className="text-right tabular-nums">{fmtCurrency(row.amount)}</TableCell>
-            <TableCell className="text-sm text-gray-700">{row.method}</TableCell>
+          <TableRow key={row.invoice_action_id}>
+            <TableCell className="font-medium">{row.fellow_name}</TableCell>
+            <TableCell className="text-right tabular-nums">{fmtCurrency(row.monthly_amount)}</TableCell>
+            <TableCell className="text-sm text-gray-700">{row.payment_method || '—'}</TableCell>
             <TableCell className="text-xs text-gray-500 max-w-md">{row.notes}</TableCell>
           </TableRow>
         ))}
@@ -62,7 +50,46 @@ const InvoiceTable = ({ rows }) => (
 );
 
 const BondStatus = () => {
-  const newInvoiceCount = NEW_INVOICES_JULY.length + NEW_INVOICES_AUGUST.length;
+  const token = useAuthStore((s) => s.token);
+  const [queue, setQueue] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError('');
+    fetch(`${import.meta.env.VITE_API_URL}/api/job-outcomes/invoice-queue`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows) => { if (!cancelled) setQueue(rows); })
+      .catch((e) => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setIsLoading(false); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  // Grouped here rather than server-side so a new month needs no code change: whatever
+  // months the queue contains become sections, in chronological order.
+  const { starts, stops, startCount } = useMemo(() => {
+    const group = (action) => {
+      const byMonth = new Map();
+      for (const row of queue) {
+        if (row.action !== action) continue;
+        if (!byMonth.has(row.effective_month)) byMonth.set(row.effective_month, []);
+        byMonth.get(row.effective_month).push(row);
+      }
+      return [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    };
+    const s = group('start');
+    return {
+      starts: s,
+      stops: group('stop'),
+      startCount: s.reduce((n, [, rows]) => n + rows.length, 0),
+    };
+  }, [queue]);
+
+  const stopCount = stops.reduce((n, [, rows]) => n + rows.length, 0);
 
   return (
     <Card>
@@ -72,37 +99,57 @@ const BondStatus = () => {
           Invoice Activity
         </CardTitle>
         <p className="text-xs text-gray-500 mt-1">
-          Ops queue · {newInvoiceCount} new · {STOP_INVOICING.length} stop · notes include reason and payment method
+          {isLoading
+            ? 'Loading ops queue…'
+            : `Ops queue · ${startCount} new · ${stopCount} stop · notes include reason and payment method`}
         </p>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
-            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
-              New invoices — start invoicing
-            </h3>
+        {error && (
+          <div className="text-sm text-red-600">Couldn’t load the invoice queue: {error}</div>
+        )}
+
+        {!isLoading && !error && !queue.length && (
+          <div className="text-sm text-gray-500">
+            No invoice starts or stops queued for this month or last.
           </div>
+        )}
 
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">July</p>
-          <InvoiceTable rows={NEW_INVOICES_JULY} />
-
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mt-4 mb-2">
-            Heads up — August
-          </p>
-          <InvoiceTable rows={NEW_INVOICES_AUGUST} />
-        </div>
-
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <Ban className="h-4 w-4 text-red-600" />
-            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
-              Stop invoicing — job loss
-            </h3>
+        {starts.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
+                New invoices — start invoicing
+              </h3>
+            </div>
+            {starts.map(([month, rows], i) => (
+              <div key={month} className={i === 0 ? '' : 'mt-4'}>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  {fmtMonth(month)}
+                </p>
+                <InvoiceTable rows={rows} />
+              </div>
+            ))}
           </div>
-          <p className="text-xs text-gray-500 mb-2">July · pause / remove from August list</p>
-          <InvoiceTable rows={STOP_INVOICING} />
-        </div>
+        )}
+
+        {stops.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Ban className="h-4 w-4 text-red-600" />
+              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
+                Stop invoicing — job loss
+              </h3>
+            </div>
+            {stops.map(([month, rows], i) => (
+              <div key={month} className={i === 0 ? '' : 'mt-4'}>
+                <p className="text-xs text-gray-500 mb-2">{fmtMonth(month)} · pause / remove from invoicing list</p>
+                <InvoiceTable rows={rows} />
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

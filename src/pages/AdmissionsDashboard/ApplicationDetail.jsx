@@ -357,24 +357,38 @@ const ApplicationDetail = () => {
     }, [applicantId, token]);
 
     const handleUpdateApplicantCohort = async () => {
-        if (!applicationData?.applicant?.applicant_id || !selectedCohortId) return;
+        if (!applicationData?.applicant?.applicant_id || !selectedCohortId || cohortUpdating) return;
+
+        // Claimed before the dialog opens — the Update Cohort button is only disabled on this flag,
+        // so setting it after the prompt resolved left the button live while the dialog was up.
+        setCohortUpdating(true);
 
         // Every staff cohort move is recorded with who did it and why. The server REQUIRES a
         // reason once an admission decision is final (moving a decided applicant re-counts that
         // decision in the destination cohort) and returns a 400 naming the status if one is
         // missing — that rule is not duplicated here, so this prompt stays optional and the
         // server's own message surfaces through the catch below.
-        const { value: reason, isConfirmed } = await Swal.fire({
-            title: 'Move to a different cohort?',
-            input: 'text',
-            inputLabel: 'Reason for the move (recorded in the audit trail)',
-            inputPlaceholder: 'e.g. applied to the wrong cycle by mistake',
-            showCancelButton: true,
-            confirmButtonText: 'Move cohort'
-        });
-        if (!isConfirmed) return;
+        let reason;
+        try {
+            const result = await Swal.fire({
+                title: 'Move to a different cohort?',
+                input: 'text',
+                inputLabel: 'Reason for the move (recorded in the audit trail)',
+                inputPlaceholder: 'e.g. applied to the wrong cycle by mistake',
+                showCancelButton: true,
+                confirmButtonText: 'Move cohort'
+            });
+            if (!result.isConfirmed) {
+                setCohortUpdating(false);
+                return;
+            }
+            reason = result.value;
+        } catch (error) {
+            console.error('Cohort move prompt failed:', error);
+            setCohortUpdating(false);
+            return;
+        }
 
-        setCohortUpdating(true);
         try {
             const response = await fetch(
                 `${import.meta.env.VITE_API_URL}/api/admissions/applicants/${applicationData.applicant.applicant_id}/cohort`,
