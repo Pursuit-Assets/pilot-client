@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import useAuthStore from '../../stores/authStore';
 import useNavStore from '../../stores/navStore';
 import { usePermissions } from '../../hooks/usePermissions';
+import { pickDefaultCohortId } from './utils/cohortUtils';
 import OverviewTab from './tabs/OverviewTab';
 import TodayTab from './tabs/TodayTab';
 import AssessmentsTab from './tabs/AssessmentsTab';
@@ -11,7 +12,6 @@ import LogsTab from './tabs/LogsTab';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:7001';
 const STORAGE_KEY = 'pursuit_program_slug';
 const COHORT_STORAGE_KEY = 'pursuit_selected_cohort';
-const DEFAULT_COHORT_NAME = 'March 2026 L1';
 
 const TABS = [
   { id: 'today',       label: 'Today' },
@@ -63,9 +63,8 @@ const AdminDashboard = () => {
         if (persisted && list.some(c => c.cohort_id === persisted)) {
           setSelectedCohortId(persisted);
         } else if (list.length > 0) {
-          // Default to March 2026 L1 if it exists, otherwise first cohort
-          const defaultCohort = list.find(c => c.name === DEFAULT_COHORT_NAME);
-          const id = defaultCohort ? defaultCohort.cohort_id : list[0].cohort_id;
+          // Newest L1 that actually has builders in it — see pickDefaultCohortId.
+          const id = pickDefaultCohortId(list);
           setSelectedCohortId(id);
           localStorage.setItem(COHORT_STORAGE_KEY, id);
         } else {
