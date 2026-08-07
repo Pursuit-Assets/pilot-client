@@ -14,6 +14,24 @@ export const normalizeStage = (stage) =>
 export const stageLabel = (stage) =>
   STAGES.find((s) => s.slug === normalizeStage(stage))?.label || '';
 
+// Chapter gate copy for RESUME rendering (live interstitial events carry the
+// server's copy — utils/onboardingStages.js INTERSTITIALS is the source of
+// truth; keep in sync).
+export const CHAPTER_META = {
+  learn: {
+    part: 2,
+    total: 3,
+    title: 'How You Learn',
+    description: "Next, I'll teach you one small thing four different ways — react to whichever actually lands. It changes how I coach you for the whole program.",
+  },
+  ahead: {
+    part: 3,
+    total: 3,
+    title: 'Looking Ahead',
+    description: "Last part: where you're headed, what your weeks actually look like, and what we'll take on together.",
+  },
+};
+
 function StageDots({ stage, completed = false }) {
   const activeIndex = completed
     ? STAGES.length

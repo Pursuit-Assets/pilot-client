@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 
 // ---------------------------------------------------------------------------
 // Mock useAuthStore — selector-based (component reads s.token).
@@ -347,33 +347,110 @@ describe('OnboardingInterface — redesign', () => {
     expect(screen.getByText('Show me — Worked example first')).toBeInTheDocument();
   });
 
-  it('a stage transition renders a chapter divider in the transcript', async () => {
+  it('a chapter boundary renders the interstitial GATE; "Let\'s go" sends chapter_continue and collapses it to a header', async () => {
     startSession.mockResolvedValue(REDESIGN_START);
-    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onStage, onDone }) => {
-      onText?.({ content: 'Welcome to the taste test.' });
-      onStage?.({ value: 'learn', label: 'How You Learn' });
+    // Closing turn + interstitial (the server's boundary response).
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onInterstitial, onDone }) => {
+      onText?.({ content: 'Loved hearing all that.' });
+      onInterstitial?.({ stage: 'learn', part: 2, total: 3, title: 'How You Learn', description: 'React to whichever lands.' });
       onDone?.({ sequenceNumber: 3 });
     });
     await renderOnboarding();
-    // The label appears in BOTH the dots header and the new divider.
-    expect(screen.getAllByText('How You Learn').length).toBeGreaterThanOrEqual(2);
+
+    // The gate card is up with its continue button; the conversation stopped.
+    expect(screen.getByText('Part 2 of 3')).toBeInTheDocument();
+    const go = screen.getByRole('button', { name: /let'?s go/i });
+
+    // Tapping continue sends the chapter_continue meta and delivers beat 1.
+    streamChat.mockClear();
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onStage, onBeat, onDone }) => {
+      onStage?.({ value: 'learn', label: 'How You Learn' });
+      onBeat?.({ index: 1, total: 4, family: 'tell_me', label: 'Tell me', content: 'TELL beat body' });
+      onDone?.({ sequenceNumber: 5 });
+    });
+    await act(async () => {
+      fireEvent.click(go);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(streamChat.mock.calls[0][2]).toBe('');
+    expect(streamChat.mock.calls[0][3].meta).toEqual({ chapter_continue: 'learn' });
+    // Gate collapsed to the header (separator role), button gone.
+    expect(screen.queryByRole('button', { name: /let'?s go/i })).not.toBeInTheDocument();
     expect(screen.getByRole('separator')).toBeInTheDocument();
+    // Beat 1 rendered with its reaction chips.
+    expect(screen.getByText(/Way 1 of 4/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /that clicked/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /next way/i })).toBeInTheDocument();
   });
 
-  it('resume with beats delivered but no pick re-renders the tap cards (fallback options)', async () => {
+  it('beat reactions: "That clicked" becomes a sent message + the followup chips send the meta', async () => {
+    startSession.mockResolvedValue(REDESIGN_START);
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onBeat, onStage, onDone }) => {
+      onStage?.({ value: 'learn' });
+      onBeat?.({ index: 2, total: 4, family: 'show_me', label: 'Show me', content: 'SHOW beat body' });
+      onDone?.({ sequenceNumber: 4 });
+    });
+    await renderOnboarding();
+
+    streamChat.mockClear();
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onBeatFollowup, onDone }) => {
+      onBeatFollowup?.({ clickedFamily: 'show_me', clickedLabel: 'Show me' });
+      onDone?.({ sequenceNumber: 5 });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /that clicked/i }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(streamChat.mock.calls[0][3].meta).toEqual({ beat_reaction: { value: 'clicked' } });
+    expect(screen.getByText('💡 That clicked')).toBeInTheDocument(); // sent-message semantics
+
+    // Followup chips arrived; "Keep moving" sends the meta as a sent message.
+    streamChat.mockClear();
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onDone }) => {
+      onText?.({ content: 'Worked examples it is.' });
+      onDone?.({ sequenceNumber: 7 });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /keep moving/i }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(streamChat.mock.calls[0][3].meta).toEqual({ beat_followup: { value: 'move_on' } });
+    expect(screen.getByText('Keep moving')).toBeInTheDocument();
+  });
+
+  it('resume mid-taste-test re-activates the LAST beat\'s chips; a pending gate re-renders the interstitial', async () => {
     startSession.mockResolvedValue({ ...REDESIGN_START, resumed: true, stage: 'learn' });
     getSession.mockResolvedValue({
-      session: { stage: 'learn', style_pick: null, beats_delivered_at: '2026-08-04T00:00:00Z' },
+      session: { stage: 'learn', style_pick: null, beats_delivered_at: 'x', beat_index: 2, interstitial_shown_for: 'learn' },
       messages: [
-        { role: 'coach', content: 'Earlier beats…' },
+        { role: 'coach', content: '**Way 1 of 4 — Tell me:** TELL beat body' },
+        { role: 'coach', content: '**Way 2 of 4 — Show me:** SHOW beat body' },
+      ],
+    });
+    await renderOnboarding();
+    // Both beats hydrate as cards; only the LAST one is active with chips.
+    expect(screen.getByText(/Way 1 of 4/i)).toBeInTheDocument();
+    expect(screen.getByText(/Way 2 of 4/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /that clicked/i })).toHaveLength(1);
+    expect(streamChat).not.toHaveBeenCalled();
+
+    // Separate resume shape: builder left AT a chapter boundary → gate card.
+    cleanup();
+    vi.clearAllMocks();
+    startSession.mockResolvedValue({ ...REDESIGN_START, resumed: true, stage: 'story' });
+    getSession.mockResolvedValue({
+      session: { stage: 'story', style_pick: null, beats_delivered_at: null, beat_index: 0, interstitial_shown_for: 'learn' },
+      messages: [
+        { role: 'coach', content: 'Closing the first chapter…' },
         { role: 'builder', content: 'ok' },
       ],
     });
     await renderOnboarding();
-    // Cards render from DEFAULT_OPTIONS without any stream event.
-    expect(screen.getByRole('button', { name: /let me try/i })).toBeInTheDocument();
-    // And no opening call was made (prior turns exist) — streamChat untouched.
-    expect(streamChat).not.toHaveBeenCalled();
+    expect(screen.getByText('Part 2 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /let'?s go/i })).toBeInTheDocument();
   });
 
   it('resume with a recorded pick shows the chip, not the cards', async () => {
