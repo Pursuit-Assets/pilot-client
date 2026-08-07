@@ -98,20 +98,27 @@ export async function abandonSession(token, sessionId) {
  *
  * Callbacks fire as the SSE stream arrives:
  *   onText({ content })          — incremental chunk (streamed coach turn)
- *   onCoachMessage({ content })  — a COMPLETE coach bubble (redesign: the
- *                                  server-sent authored taste-test beats)
- *   onStage({ value })           — server-stamped stage transition (redesign)
+ *   onCoachMessage({ content })  — a COMPLETE coach bubble (redesign)
+ *   onStage({ value, label })    — server-stamped stage transition (redesign)
  *   onStyleChoices({ options })  — render the style tap cards (redesign)
+ *   onBeat({ index, total, family, label, content }) — ONE taste-test sample
+ *                                  (paced delivery; client renders reaction chips)
+ *   onBeatFollowup({ clickedFamily, clickedLabel }) — "see the rest / keep
+ *                                  moving" chips after a clicked reaction
+ *   onInterstitial({ stage, part, total, title, description }) — chapter gate
+ *                                  card; next chapter starts on the continue tap
  *   onDone({ sequenceNumber })   — stream finished cleanly
  *   onError({ error })           — server-emitted SSE error event
  *
- * `meta` rides in the POST body for structured turns (redesign): a style-card
- * tap sends { style_pick: '<family>' } with an empty message.
+ * `meta` rides in the POST body for structured turns (redesign): style-card
+ * tap { style_pick }, beat reaction { beat_reaction: { value } }, followup
+ * { beat_followup: { value } }, chapter gate { chapter_continue: '<stage>' } —
+ * all with an empty message.
  *
  * `signal` is an AbortSignal — abort to tear down an in-flight stream
  * (e.g., on unmount). Returns when the stream ends, errors, or is aborted.
  */
-export async function streamChat(token, sessionId, message, { onText, onCoachMessage, onStage, onStyleChoices, onDone, onError, signal, meta } = {}) {
+export async function streamChat(token, sessionId, message, { onText, onCoachMessage, onStage, onStyleChoices, onBeat, onBeatFollowup, onInterstitial, onDone, onError, signal, meta } = {}) {
   const res = await fetch(
     `${API_URL}/api/onboarding-session/${encodeURIComponent(sessionId)}/chat`,
     {
@@ -168,6 +175,12 @@ export async function streamChat(token, sessionId, message, { onText, onCoachMes
         onStage?.(data);
       } else if (data.type === 'style_choices') {
         onStyleChoices?.(data);
+      } else if (data.type === 'beat') {
+        onBeat?.(data);
+      } else if (data.type === 'beat_followup') {
+        onBeatFollowup?.(data);
+      } else if (data.type === 'interstitial') {
+        onInterstitial?.(data);
       } else if (data.type === 'done') {
         sawDone = true;
         onDone?.(data);

@@ -14,9 +14,15 @@ import AutoExpandTextarea from '../../../components/AutoExpandTextarea';
 import TaskCompletionBar from '../../../components/TaskCompletionBar/TaskCompletionBar';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import StageDots, { stageLabel, normalizeStage } from './onboarding/StageDots';
+import StageDots, { stageLabel, normalizeStage, CHAPTER_META } from './onboarding/StageDots';
 import StyleChoiceCards from './onboarding/StyleChoiceCards';
+import InterstitialCard from './onboarding/InterstitialCard';
+import BeatCard from './onboarding/BeatCard';
 import CoachCard from './onboarding/CoachCard';
+
+// Hydrated beat turns are persisted as '**Way N of 4 — Label:** text' — parse
+// them back into beat cards so resume renders the same UI as live delivery.
+const BEAT_TURN_RE = /^\*\*Way (\d) of (\d) — (.+?):\*\* ([\s\S]*)$/;
 
 // Resume hydration: a persisted tap turn reads '[Builder tapped: Show me — …]'
 // (self-describing for LLM history replay) — display it like the sent message
@@ -155,14 +161,26 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
           { id: `u-${seqRef.current}`, role: 'user', content: messageText, seq: seqRef.current },
         ]);
       }
-      // Prepare a streaming coach bubble.
-      seqRef.current += 1;
-      const coachBubbleId = `c-${seqRef.current}`;
-      streamingMsgIdRef.current = coachBubbleId;
-      setMessages((prev) => [
-        ...prev,
-        { id: coachBubbleId, role: 'coach', content: '', seq: seqRef.current, streaming: true },
-      ]);
+      // Streaming coach bubble. Meta-only turns (beat taps, chapter gates)
+      // often produce control events with NO streamed text — the bubble is
+      // created UPFRONT only for turns that always stream (typed messages +
+      // the opening), and lazily on the first text chunk otherwise, so a
+      // phantom "Coach is thinking…" bubble never strands in the transcript.
+      const expectStream = messageText.length > 0 || !meta;
+      let coachBubbleId = null;
+      const ensureCoachBubble = () => {
+        if (coachBubbleId) return;
+        seqRef.current += 1;
+        coachBubbleId = `c-${seqRef.current}`;
+        streamingMsgIdRef.current = coachBubbleId;
+        const id = coachBubbleId;
+        const seq = seqRef.current;
+        setMessages((prev) => [
+          ...prev,
+          { id, role: 'coach', content: '', seq, streaming: true },
+        ]);
+      };
+      if (expectStream) ensureCoachBubble();
 
       // Tear down any prior stream.
       if (abortRef.current) abortRef.current.abort();
@@ -178,13 +196,15 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
           signal: abortRef.current.signal,
           meta,
           onText: ({ content }) => {
+            ensureCoachBubble();
             accumulated += content;
             if (!sawCompletionMarker && accumulated.includes(COMPLETION_MARKER)) {
               sawCompletionMarker = true;
             }
             const visible = sawCompletionMarker ? stripMarker(accumulated) : accumulated;
+            const id = coachBubbleId;
             setMessages((prev) => prev.map((m) =>
-              m.id === coachBubbleId ? { ...m, content: visible } : m
+              m.id === id ? { ...m, content: visible } : m
             ));
           },
           // Redesign control events — server-emitted, never in the LLM text.
@@ -199,28 +219,45 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
             const seq = seqRef.current;
             setMessages((prev) => [...prev, { id, role: 'coach', content, seq }]);
           },
-          onStage: ({ value, label }) => {
+          onStage: ({ value }) => {
             setRedesign(true);
             const next = normalizeStage(value);
-            // Server re-emits stage every turn — only a real transition gets
-            // a chapter divider.
             if (!next || next === stageRef.current) return;
             setStageBoth(next);
+            if (next === 'ahead') {
+              // Entering Looking Ahead retires any never-tapped taste-test UI
+              // (the pick happened in words instead).
+              setMessages((prev) => prev
+                .filter((m) => m.kind !== 'style_choices' && m.kind !== 'beat_followup')
+                .map((m) => (m.kind === 'beat' && m.active ? { ...m, active: false } : m)));
+            }
+          },
+          onInterstitial: (data) => {
+            // The chapter gate — the conversation stops here; the next
+            // chapter starts on the builder's "Let's go" tap.
             seqRef.current += 1;
-            const id = `dv-${seqRef.current}`;
-            const dividerLabel = label || stageLabel(next);
-            setMessages((prev) => {
-              // Entering Looking Ahead retires any never-tapped cards (the
-              // pick happened in words instead).
-              const pruned = next === 'ahead' ? prev.filter((m) => m.kind !== 'style_choices') : prev;
-              const item = { id, kind: 'divider', label: dividerLabel };
-              // The divider belongs BEFORE the coach bubble that opens the
-              // new chapter — which is usually mid-stream when this event
-              // arrives. Insert ahead of the streaming bubble.
-              const idx = pruned.findIndex((m) => m.streaming);
-              if (idx === -1) return [...pruned, item];
-              return [...pruned.slice(0, idx), item, ...pruned.slice(idx)];
-            });
+            const id = `iv-${seqRef.current}`;
+            setMessages((prev) => [
+              ...prev,
+              { id, kind: 'interstitial', pending: true, stage: data.stage, part: data.part, total: data.total, title: data.title, description: data.description },
+            ]);
+          },
+          onBeat: (data) => {
+            // A new beat deactivates the previous one's chips.
+            seqRef.current += 1;
+            const id = `bt-${seqRef.current}`;
+            setMessages((prev) => [
+              ...prev.map((m) => (m.kind === 'beat' && m.active ? { ...m, active: false } : m)),
+              { id, kind: 'beat', active: true, index: data.index, total: data.total, family: data.family, label: data.label, content: data.content },
+            ]);
+          },
+          onBeatFollowup: (data) => {
+            seqRef.current += 1;
+            const id = `bf-${seqRef.current}`;
+            setMessages((prev) => [
+              ...prev,
+              { id, kind: 'beat_followup', clickedLabel: data.clickedLabel },
+            ]);
           },
           onStyleChoices: ({ options }) => {
             // Cards are a transcript ITEM at their chronological position —
@@ -274,11 +311,13 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
         setIsSending(false);
         streamingMsgIdRef.current = null;
         // Belt-and-suspenders: clear streaming:true on ANY bubble that's
-        // still flagged. The service layer's onDone fires when the SSE
-        // stream closes cleanly even without a {type:done} event, but
-        // covering this here too means a thrown error (network drop,
-        // abort, etc.) can't leave a permanent loading indicator.
-        setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
+        // still flagged, and DROP a bubble that never received any content
+        // (a turn that answered with control events only). Covering this
+        // here means a thrown error (network drop, abort, etc.) can't leave
+        // a permanent loading indicator.
+        setMessages((prev) => prev
+          .filter((m) => !(m.streaming && !(m.content && m.content.length)))
+          .map((m) => (m.streaming ? { ...m, streaming: false } : m)));
         // Fire the deferred completion AFTER the bubble is committed and the
         // streaming flag cleared — running in finally means a stream error
         // post-marker still completes the session (vs. the previous bug
@@ -324,7 +363,8 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
           try {
             const { session: priorSession, messages: priorMessages } = await getSession(token, startData.sessionId);
             // Redesign resume: stage + pick come from the server-stamped
-            // session row, not the transcript.
+            // session row, not the transcript. Mid-taste-test without a pick
+            // → the LAST delivered beat re-renders with its reaction chips.
             const resumeNeedsCards = !!(
               startData.redesign && priorSession &&
               priorSession.beats_delivered_at && !priorSession.style_pick
@@ -335,22 +375,49 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
             }
             if (!cancelled && Array.isArray(priorMessages) && priorMessages.length > 0) {
               hadPriorTurns = true;
+              const beatIndex = priorSession?.beat_index || 0;
               const hydrated = priorMessages.map((m) => {
                 seqRef.current += 1;
+                const raw = m.content || '';
+                // Persisted beat turns render as beat cards (the last one
+                // stays ACTIVE with chips when no pick was captured yet).
+                const beatMatch = m.role !== 'builder' && raw.match(BEAT_TURN_RE);
+                if (beatMatch) {
+                  const idx = parseInt(beatMatch[1], 10);
+                  return {
+                    id: `r-${seqRef.current}`,
+                    kind: 'beat',
+                    index: idx,
+                    total: parseInt(beatMatch[2], 10),
+                    label: beatMatch[3],
+                    content: beatMatch[4],
+                    active: resumeNeedsCards && idx === beatIndex,
+                  };
+                }
                 return {
                   id: `r-${seqRef.current}`,
                   role: m.role === 'builder' ? 'user' : 'coach',
                   // Persisted tap turns ('[Builder tapped: …]') display as
                   // the sent message they represent.
-                  content: displayTurnContent(m.content || ''),
+                  content: displayTurnContent(raw),
                   seq: seqRef.current,
                 };
               });
-              // Beats went out but no pick was ever captured — re-render the
-              // tap cards at the end of the hydrated transcript.
-              if (resumeNeedsCards) {
+              // Gate pending — the builder left at a chapter boundary; the
+              // interstitial re-renders so they can continue.
+              const pendingGate = priorSession?.interstitial_shown_for
+                && normalizeStage(priorSession.interstitial_shown_for) !== normalizeStage(priorSession.stage)
+                ? normalizeStage(priorSession.interstitial_shown_for)
+                : null;
+              if (pendingGate && CHAPTER_META[pendingGate]) {
                 seqRef.current += 1;
-                hydrated.push({ id: `sc-${seqRef.current}`, kind: 'style_choices', options: null });
+                hydrated.push({
+                  id: `iv-${seqRef.current}`,
+                  kind: 'interstitial',
+                  pending: true,
+                  stage: pendingGate,
+                  ...CHAPTER_META[pendingGate],
+                });
               }
               setMessages(hydrated);
             }
@@ -417,6 +484,43 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
       { id, role: 'user', content: `${option.label} — ${option.description}`, seq },
     ]);
     sendChat('', { style_pick: option.family });
+  };
+
+  // Chapter gate: the interstitial card collapses into the chapter HEADER and
+  // the continue meta turn asks the server to open the chapter.
+  const handleChapterContinue = (item) => {
+    if (isSending) return;
+    setMessages((prev) => prev.map((m) => (m.id === item.id ? { ...m, pending: false } : m)));
+    sendChat('', { chapter_continue: item.stage });
+  };
+
+  // Beat reactions — judged in the moment, one beat at a time.
+  const handleBeatClicked = (item) => {
+    if (isSending) return;
+    seqRef.current += 1;
+    const id = `u-${seqRef.current}`;
+    const seq = seqRef.current;
+    setMessages((prev) => [
+      ...prev.map((m) => (m.id === item.id ? { ...m, active: false } : m)),
+      { id, role: 'user', content: '💡 That clicked', seq },
+    ]);
+    sendChat('', { beat_reaction: { value: 'clicked' } });
+  };
+  const handleBeatNext = (item) => {
+    if (isSending) return;
+    setMessages((prev) => prev.map((m) => (m.id === item.id ? { ...m, active: false } : m)));
+    sendChat('', { beat_reaction: { value: 'next' } });
+  };
+  const handleBeatFollowup = (item, value) => {
+    if (isSending) return;
+    seqRef.current += 1;
+    const id = `u-${seqRef.current}`;
+    const seq = seqRef.current;
+    setMessages((prev) => [
+      ...prev.filter((m) => m.id !== item.id),
+      { id, role: 'user', content: value === 'rest' ? 'Show me the rest' : 'Keep moving', seq },
+    ]);
+    sendChat('', { beat_followup: { value } });
   };
 
   // Finalize the session (enqueues server-side extraction) then hand control
@@ -555,16 +659,57 @@ function OnboardingInterface({ taskId, userId, isCompleted, isLastTask, onComple
           )}
           {messages.map((message, index) => {
             // ---- Redesign transcript items ----
-            // Chapter divider: each stage reads as its own piece of the
-            // conversation instead of one long chat.
-            if (message.kind === 'divider') {
+            // Chapter gate / header.
+            if (message.kind === 'interstitial') {
               return (
-                <div key={message.id ?? index} className="flex items-center gap-3 my-8" role="separator">
-                  <div className="flex-1 h-px bg-stardust" />
-                  <span className="text-xs font-proxima-bold uppercase tracking-wide text-pursuit-purple">
-                    {message.label}
-                  </span>
-                  <div className="flex-1 h-px bg-stardust" />
+                <InterstitialCard
+                  key={message.id ?? index}
+                  part={message.part}
+                  total={message.total}
+                  title={message.title}
+                  description={message.description}
+                  pending={message.pending && !isCompleted}
+                  disabled={isSending || isFinishing}
+                  onContinue={() => handleChapterContinue(message)}
+                />
+              );
+            }
+            // One taste-test sample with in-the-moment reaction chips.
+            if (message.kind === 'beat') {
+              return (
+                <BeatCard
+                  key={message.id ?? index}
+                  index={message.index}
+                  total={message.total}
+                  label={message.label}
+                  content={message.content}
+                  active={message.active && !isCompleted}
+                  disabled={isSending || isFinishing}
+                  onClicked={() => handleBeatClicked(message)}
+                  onNext={() => handleBeatNext(message)}
+                />
+              );
+            }
+            // "See the rest / keep moving" after a clicked reaction.
+            if (message.kind === 'beat_followup') {
+              return (
+                <div key={message.id ?? index} className="flex gap-2 my-3 justify-end">
+                  <button
+                    type="button"
+                    disabled={isSending || isFinishing}
+                    onClick={() => handleBeatFollowup(message, 'rest')}
+                    className="rounded-full border border-stardust text-[#555] bg-white font-proxima font-semibold text-sm px-4 py-1.5 hover:border-gray-400 transition-colors disabled:opacity-50"
+                  >
+                    Show me the rest
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSending || isFinishing}
+                    onClick={() => handleBeatFollowup(message, 'move_on')}
+                    className="rounded-full border border-pursuit-purple text-pursuit-purple bg-white font-proxima font-semibold text-sm px-4 py-1.5 hover:bg-pursuit-purple/5 transition-colors disabled:opacity-50"
+                  >
+                    Keep moving →
+                  </button>
                 </div>
               );
             }
