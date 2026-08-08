@@ -6,7 +6,6 @@ import { searchUsers, generateNarrative } from '../../../services/builderProfile
 import BuilderSnapshotHero from './components/BuilderSnapshotHero';
 import BuilderSnapshotSkillsPanel from './components/BuilderSnapshotSkillsPanel';
 import BuilderSnapshotStoryGrid from './components/BuilderSnapshotStoryGrid';
-import BuilderSnapshotAchievements from './components/BuilderSnapshotAchievements';
 import BuilderSnapshotTimeline from './components/BuilderSnapshotTimeline';
 import BuilderSnapshotReadiness from './components/BuilderSnapshotReadiness';
 import BuilderSnapshotNarrative from './components/BuilderSnapshotNarrative';
@@ -453,10 +452,7 @@ const BuilderSnapshot = ({ embedded = false }) => {
               onBack={handleClearUser}
             />
 
-            <BuilderSnapshotReadiness
-              readiness={snapshot.readiness}
-              courseBands={proficiencyScale?.courseBands}
-            />
+            <BuilderSnapshotReadiness readiness={snapshot.readiness} />
 
             <BuilderSnapshotNarrative
               narrative={narrative}
@@ -469,15 +465,11 @@ const BuilderSnapshot = ({ embedded = false }) => {
               skillTaxonomy={taxonomy || { categories: {}, skills: {} }}
               skillProficiency={snapshot.profile?.skill_proficiency || {}}
               skillLevels={snapshot.profile?.skill_levels || {}}
+              courseBands={proficiencyScale?.courseBands}
+              courseLevel={snapshot.readiness?.cohort?.course_level}
             />
 
             <BuilderSnapshotStoryGrid profile={snapshot.profile} />
-
-            <BuilderSnapshotAchievements
-              competencies={snapshot.profile?.competencies}
-              skillTaxonomy={taxonomy}
-              skillProficiency={snapshot.profile?.skill_proficiency}
-            />
 
             <BuilderSnapshotTimeline
               performance={snapshot.profile?.performance}

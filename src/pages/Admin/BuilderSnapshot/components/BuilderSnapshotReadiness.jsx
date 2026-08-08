@@ -29,15 +29,12 @@ import { DREYFUS_LABELS } from '../../coachDreyfus';
  *   - readiness: the `readiness` block from GET /api/admin/builder-profiles/:id
  *                (queries/builderReadiness.js). Null for a builder with no active
  *                cohort — the panel then self-hides rather than inventing peers.
- *   - tiers:     skill_proficiency_scale.tiers, via the /v2-coach-engine bundle.
- *   - courseBands: skill_proficiency_scale.courseBands — the REACHABLE band per
- *                course. Not a target: it says 4-5 is out of scope for L1, not
- *                where L1 should land.
+ *
+ * The stage DISTRIBUTION and the course reachable-band note used to live here in
+ * a wide first tile; both moved to BuilderSnapshotSkillsPanel (2026-08-07),
+ * where the skills they describe actually are. That left four equal signals.
  */
 
-// Sequential ramp for ordinal Dreyfus stages — the same grey→indigo ramp the
-// Skill Profile meters use, so a stage reads identically across the page.
-const LEVEL_RAMP = ['#b9bcc9', '#a3a6e0', '#8186ee', '#5b5fe8', '#3f3fd0', '#2a2a9e'];
 
 // Diverging triple for skill movement: two hues + a NEUTRAL midpoint.
 // Validated with the dataviz palette checker (light surface, all-pairs):
@@ -55,6 +52,13 @@ const MOVE = {
   declined: { color: '#ea580c', label: 'declined', Icon: ArrowDown },
 };
 
+/** 1st / 2nd / 3rd / 4th … — 11-13 are the exceptions. */
+const ordinalSuffix = (n) => {
+  const t = n % 100;
+  if (t >= 11 && t <= 13) return 'th';
+  return { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th';
+};
+
 const DIRECTION_HEADLINE = {
   improving: 'Improving',
   holding: 'Holding steady',
@@ -62,13 +66,19 @@ const DIRECTION_HEADLINE = {
   no_movement_yet: 'Too early to tell',
 };
 
-const Tile = ({ icon: Icon, label, children, span = '' }) => (
-  <div className={`rounded-xl bg-white ring-1 ring-[#E3E3E3] p-5 flex flex-col ${span}`}>
-    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-[#666] font-proxima-bold">
-      <Icon className="w-3.5 h-3.5 text-[#999]" />
-      {label}
+// Pursuit's stat-card: white, 7px purple bar across the top. Same pattern the
+// infographic system and the Coach Evals KPI row use, so the four signals read
+// as one family with the rest of the admin surface.
+const Tile = ({ icon: Icon, label, children }) => (
+  <div className="rounded-xl bg-white ring-1 ring-[#E3E3E3] overflow-hidden flex flex-col shadow-[0_2px_4px_rgba(0,0,0,.05)]">
+    <div className="h-[7px] bg-[#4242EA]" aria-hidden="true" />
+    <div className="p-4 flex flex-col flex-1">
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-[#666] font-proxima-bold">
+        <Icon className="w-3.5 h-3.5 text-[#999]" />
+        {label}
+      </div>
+      <div className="mt-2.5 flex-1">{children}</div>
     </div>
-    <div className="mt-3 flex-1">{children}</div>
   </div>
 );
 
@@ -78,56 +88,6 @@ const Headline = ({ children }) => (
 const Note = ({ children }) => (
   <div className="mt-2 text-xs text-[#666] leading-relaxed">{children}</div>
 );
-
-/**
- * StageBar — the builder's assessed skills stacked by Dreyfus stage.
- * Sequential ramp, 2px surface gaps, a direct count on every segment wide
- * enough to hold one. Replaces the mean: a distribution can't be misread as a
- * percentage.
- */
-const StageBar = ({ histogram, assessed }) => {
-  const stages = [0, 1, 2, 3, 4, 5]
-    .map((lvl) => ({ lvl, n: histogram?.[lvl] || 0 }))
-    .filter((s) => s.n > 0);
-  if (assessed === 0) return <div className="text-sm italic text-[#999]">No skills assessed yet.</div>;
-
-  return (
-    <div>
-      <div className="flex gap-[2px] h-7 rounded-md overflow-hidden">
-        {stages.map(({ lvl, n }) => {
-          const pct = (n / assessed) * 100;
-          return (
-            <div
-              key={lvl}
-              className="flex items-center justify-center first:rounded-l-md last:rounded-r-md"
-              style={{ width: `${pct}%`, backgroundColor: LEVEL_RAMP[lvl], minWidth: 4 }}
-              title={`${n} skill${n === 1 ? '' : 's'} at level ${lvl} — ${DREYFUS_LABELS[lvl]}`}
-            >
-              {pct >= 12 && (
-                <span className={`text-[11px] font-proxima-bold tabular-nums ${lvl <= 1 ? 'text-[#1E1E1E]' : 'text-white'}`}>
-                  {n}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      {/* Legend — identity is never colour-alone. */}
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-        {stages.map(({ lvl, n }) => (
-          <span key={lvl} className="inline-flex items-center gap-1.5 text-[11px] text-[#666]">
-            <span
-              aria-hidden="true"
-              className="inline-block w-2.5 h-2.5 rounded-[2px]"
-              style={{ backgroundColor: LEVEL_RAMP[lvl] }}
-            />
-            {DREYFUS_LABELS[lvl]} <span className="tabular-nums text-[#999]">({n})</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 /** MoveBar — diverging stacked bar of improved / held / declined. */
 const MoveBar = ({ direction }) => {
@@ -202,15 +162,12 @@ const BulletBar = ({ value, reference, referenceLabel }) => {
   );
 };
 
-const BuilderSnapshotReadiness = ({ readiness, courseBands }) => {
+const BuilderSnapshotReadiness = ({ readiness }) => {
   // No active cohort → no honest peer comparison. Self-hide rather than invent one.
   if (!readiness) return null;
 
   const { cohort, distribution, direction, independence, engagement, position } = readiness;
   const modal = Number.isInteger(distribution?.modalLevel) ? distribution.modalLevel : null;
-  const band = (courseBands || []).find((b) => b.course === cohort?.course_level) || null;
-  const notYet = distribution?.notYetTaught || [];
-  const earlier = distribution?.earlierCourse || [];
 
   // Scaffolding read: compare to the cohort, not to an invented target.
   const capDelta =
@@ -235,63 +192,26 @@ const BuilderSnapshotReadiness = ({ readiness, courseBands }) => {
         </p>
       </header>
 
-      {/* Skill stages spans the full row — it carries the distribution bar, its
-          legend and the band note, and a distribution reads better wide. The
-          other three sit beneath it in equal columns. A 2+1+1 split across four
-          columns left Engagement orphaned on its own row. */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Tile icon={Users} label="Skill stages" span="lg:col-span-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Tile icon={Users} label="Peer position">
           <Headline>
-            {modal != null ? DREYFUS_LABELS[modal] : '—'}
-            {position?.percentile != null && (
-              <span className="ml-2 text-sm font-proxima text-[#666]">
-                · {position.percentile}th percentile
+            {position?.percentile != null ? (
+              <>
+                {position.percentile}
+                <span className="text-[15px] font-proxima-bold align-baseline">
+                  {ordinalSuffix(position.percentile)}
+                </span>
+              </>
+            ) : '—'}
+          </Headline>
+          <Note>
+            percentile of {cohort?.peers_with_data ?? 0} peers
+            {modal != null && (
+              <span className="block mt-1 text-[#AAA]">
+                cohort median stage · {DREYFUS_LABELS[modal]}
               </span>
             )}
-          </Headline>
-          <div className="mt-3">
-            <StageBar histogram={distribution?.histogram} assessed={distribution?.assessed || 0} />
-          </div>
-          <Note>
-            {distribution?.assessed || 0} skill{distribution?.assessed === 1 ? '' : 's'} assessed.
-            {position?.avg_level != null && position?.peer_median_avg_level != null && (
-              <>
-                {' '}Mean level of graded observations {position.avg_level} vs cohort median{' '}
-                {position.peer_median_avg_level}.
-              </>
-            )}
-            {band && (
-              <>
-                {' '}In {band.course} the reachable band is{' '}
-                <span className="font-proxima-bold text-[#1E1E1E]">
-                  {DREYFUS_LABELS[band.reachable[0]]}–{DREYFUS_LABELS[band.reachable[band.reachable.length - 1]]}
-                </span>{' '}
-                — {band.note}
-              </>
-            )}
           </Note>
-          {(notYet.length > 0 || earlier.length > 0) && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {notYet.map((s) => (
-                <span
-                  key={s.slug}
-                  title={`${s.slug} is taught in ${s.learnedIn.join('/')} — assessed at ${DREYFUS_LABELS[s.level]} before the curriculum covers it`}
-                  className="inline-flex items-center rounded-full bg-[#0d9488]/10 ring-1 ring-[#0d9488]/30 px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#0f766e] font-proxima-bold"
-                >
-                  ahead: {s.slug}
-                </span>
-              ))}
-              {earlier.map((s) => (
-                <span
-                  key={s.slug}
-                  title={`${s.slug} was taught in ${s.learnedIn.join('/')} — earlier than this builder's current course`}
-                  className="inline-flex items-center rounded-full bg-[#F1F1F3] ring-1 ring-[#E3E3E3] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#666] font-proxima-bold"
-                >
-                  earlier course: {s.slug}
-                </span>
-              ))}
-            </div>
-          )}
         </Tile>
 
         <Tile icon={TrendingUp} label="Direction">

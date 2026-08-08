@@ -72,6 +72,7 @@ vi.mock('react-markdown', () => ({
 }));
 
 import BuilderSnapshot, { composeSummary } from '../BuilderSnapshot';
+import { evidenceCaveat } from '../components/BuilderSnapshotSkillsPanel';
 
 const FULL_SNAPSHOT = {
   identity: {
@@ -129,11 +130,12 @@ const FAKE_TAXONOMY = {
     pro: { name: 'Professionalism' },
   },
   skills: {
-    'write-structure-prompts': { name: 'Write & Structure Prompts', slug: 'write-structure-prompts', category: 'ai' },
-    'evaluate-ai-critically': { name: 'Evaluate AI Critically', slug: 'evaluate-ai-critically', category: 'ai' },
-    'reason-about-models': { name: 'Reason About Models', slug: 'reason-about-models', category: 'ai' },
-    'write-clean-code': { name: 'Write Clean Code', slug: 'write-clean-code', category: 'swe' },
-    'communicate-effectively': { name: 'Communicate Effectively', slug: 'communicate-effectively', category: 'pro' },
+    'write-structure-prompts': { name: 'Write & Structure Prompts', slug: 'write-structure-prompts', category: 'ai', learnedIn: ['L1'] },
+    'evaluate-ai-critically': { name: 'Evaluate AI Critically', slug: 'evaluate-ai-critically', category: 'ai', learnedIn: ['L1'] },
+    // L2-only: an L1 builder assessed here is AHEAD of the curriculum.
+    'reason-about-models': { name: 'Reason About Models', slug: 'reason-about-models', category: 'ai', learnedIn: ['L2'] },
+    'write-clean-code': { name: 'Write Clean Code', slug: 'write-clean-code', category: 'swe', learnedIn: ['L1'] },
+    'communicate-effectively': { name: 'Communicate Effectively', slug: 'communicate-effectively', category: 'pro', learnedIn: ['L1'] },
   },
 };
 
@@ -254,44 +256,38 @@ describe('BuilderSnapshot', () => {
     expect(container.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
   });
 
-  it('renders skills grouped into category sections as Dreyfus bar meters', async () => {
+  it('groups skills by STAGE, strongest first — not by taxonomy category', async () => {
     currentSearch = 'userId=42';
-    renderUI();
-    // Wait for the taxonomy fetch to resolve and groups to render.
-    await waitFor(() => {
-      expect(screen.getByText('AI Fluency')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Software Engineering')).toBeInTheDocument();
-    // Skill names appear in their group (and may also appear in a leaderboard).
-    expect(screen.getAllByText('Write & Structure Prompts').length).toBeGreaterThan(0);
-    // Dreyfus level label renders (level 4 → Proficient).
-    expect(screen.getAllByText(/Proficient/).length).toBeGreaterThan(0);
-    // Professionalism only has an N/A skill → hidden in the assessed view.
-    expect(screen.queryByText('Professionalism')).toBeNull();
+    await act(async () => { renderUI(); });
+    await screen.findByText('Skill profile');
+    // Levels 4/3/2/1 → one group each, highest first. Category names must NOT
+    // appear: grouping by category answered the wrong question.
+    const stages = screen.getAllByRole('heading', { level: 2 });
+    expect(stages.some((h) => h.textContent === 'Skill profile')).toBe(true);
+    expect(screen.getByText('Proficient')).toBeInTheDocument();
+    expect(screen.getByText('Competent')).toBeInTheDocument();
+    expect(screen.queryByText('AI Fluency')).not.toBeInTheDocument();
+    expect(screen.queryByText('Software Engineering')).not.toBeInTheDocument();
   });
 
-  it('the All toggle reveals unassessed (N/A) skills', async () => {
+  it('retired the Top Strengths / Growth Areas leaderboards — stage grouping says it once', async () => {
     currentSearch = 'userId=42';
-    renderUI();
-    await waitFor(() => {
-      expect(screen.getByText('AI Fluency')).toBeInTheDocument();
-    });
-    expect(screen.queryByText('Communicate Effectively')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    await act(async () => { renderUI(); });
+    await screen.findByText('Skill profile');
+    expect(screen.queryByText('Top Strengths')).not.toBeInTheDocument();
+    expect(screen.queryByText('Growth Areas')).not.toBeInTheDocument();
+  });
+
+  it('frames unassessed skills as coverage, and the All toggle reveals them', async () => {
+    currentSearch = 'userId=42';
+    await act(async () => { renderUI(); });
+    await screen.findByText('Skill profile');
+    // communicate-effectively has no proficiency entry → not assessed.
+    expect(screen.queryByText('Communicate Effectively')).not.toBeInTheDocument();
+    expect(screen.getByText(/Coverage, not weakness/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show all/ }));
     expect(screen.getByText('Communicate Effectively')).toBeInTheDocument();
-    expect(screen.getAllByText('N/A').length).toBeGreaterThan(0);
-  });
-
-  it('collapses a category section when its header is clicked', async () => {
-    currentSearch = 'userId=42';
-    renderUI();
-    await waitFor(() => {
-      expect(screen.getByText('AI Fluency')).toBeInTheDocument();
-    });
-    const header = screen.getByRole('button', { name: /AI Fluency/i });
-    expect(header).toHaveAttribute('aria-expanded', 'true');
-    fireEvent.click(header);
-    expect(header).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('renders the themed sections with markdown content', async () => {
@@ -437,35 +433,11 @@ describe('Recent Performance timeline', () => {
 });
 
 describe('Strongest Skills panel', () => {
-  it('renders the most recent EVIDENCE (the old code read a `summary` key that never existed)', async () => {
+  it('is removed — its evidence is now carried by the narrative\'s cited claims', async () => {
     await renderRealShape();
-    expect(screen.getByText(/Wrote a complete, structured AI prompt/)).toBeInTheDocument();
-  });
-
-  it('ranks by Dreyfus level, not evidence count', async () => {
-    await renderRealShape();
-    // reason-about-models has the MOST observations (2 graded) but level 1;
-    // write-structure-prompts has 1 observation at level 4. Level must win —
-    // ranking by count crowned the weakest skill as the top achievement.
-    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
-    const strongest = headings.indexOf('Write & Structure Prompts');
-    const weakest = headings.indexOf('Reason About Models');
-    expect(strongest).toBeGreaterThanOrEqual(0);
-    expect(strongest).toBeLessThan(weakest);
-    // The crest reads "#1 · <stage>" — bare stage name, no L-number. The
-    // L-prefix was dropped repo-wide (coachDreyfus) because a leading digit
-    // implies a score the Dreyfus scale doesn't carry. Asserting rank and label
-    // together also pins that the level-4 skill sorted first.
-    expect(screen.getByText(/#1 · Proficient/)).toBeInTheDocument();
-    expect(screen.queryByText(/L4/)).not.toBeInTheDocument();
-  });
-
-  it('excludes onboarding priors (task_id: null) from the observation count', async () => {
-    await renderRealShape();
-    // reason-about-models has 3 evidence rows, one of which is an onboarding
-    // prior — only the 2 graded observations should count.
-    expect(screen.getByText('2 observations')).toBeInTheDocument();
-    expect(screen.queryByText(/Onboarding conversation/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Strongest Skills')).not.toBeInTheDocument();
+    expect(screen.queryByText('Top Competencies')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Most recent evidence/)).not.toBeInTheDocument();
   });
 });
 
@@ -533,12 +505,10 @@ describe('Readiness panel', () => {
     await renderWithReadiness();
     const panel = screen.getByLabelText('Readiness signals');
     expect(screen.getByText('Where this builder stands')).toBeInTheDocument();
-    // The stage appears in the headline AND in the bar's legend — the legend is
-    // required so identity is never colour-alone, so both are expected.
-    expect(within(panel).getAllByText('Advanced Beginner').length).toBeGreaterThanOrEqual(1);
-    expect(within(panel).getByText(/58th percentile/)).toBeInTheDocument();
-    // 9 assessed skills, and the mean is never the headline.
-    expect(within(panel).getByText(/9 skills assessed/)).toBeInTheDocument();
+    // Percentile is the headline; the cohort's median stage is the supporting note.
+    expect(within(panel).getByText('58')).toBeInTheDocument();
+    expect(within(panel).getByText(/percentile of 77 peers/)).toBeInTheDocument();
+    expect(within(panel).getByText(/cohort median stage · Advanced Beginner/)).toBeInTheDocument();
   });
 
   it('shows direction as movement against the builder\'s OWN prior, with the raw counts', async () => {
@@ -552,15 +522,11 @@ describe('Readiness panel', () => {
     expect(within(panel).getByText(/65% of 20 movable assessments went up/)).toBeInTheDocument();
   });
 
-  it('flags a skill the course does not teach yet as AHEAD, not a shortfall', async () => {
+  it('no longer carries the distribution or the band note — both moved to the Skill profile', async () => {
     await renderWithReadiness();
-    expect(screen.getByText(/ahead: analyze-industry-market/)).toBeInTheDocument();
-  });
-
-  it('states the reachable band for the course rather than implying /5 is the target', async () => {
-    await renderWithReadiness();
-    expect(screen.getByText(/reachable band is/)).toBeInTheDocument();
-    expect(screen.getByText(/out of scope for a first course/)).toBeInTheDocument();
+    const panel = screen.getByLabelText('Readiness signals');
+    expect(within(panel).queryByText(/reachable band is/)).not.toBeInTheDocument();
+    expect(within(panel).queryByText(/not assessed/)).not.toBeInTheDocument();
   });
 
   it('reads scaffolding against the cohort median, not an invented target', async () => {
@@ -698,5 +664,70 @@ describe('Narrative panel', () => {
     expect(screen.queryByText(/Confirm he can produce a full git workflow/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /What to check next/ }));
     expect(screen.getByText(/Confirm he can produce a full git workflow/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skill profile — what the stage regroup added. The per-row 6-pip meters were
+// removed because inside a stage group every skill shares the same level, so
+// the row now carries the two things that actually vary: how consistently the
+// grader agrees, and how many graded observations back it.
+// ---------------------------------------------------------------------------
+describe('Skill profile — evidence quality and course scope', () => {
+  it('flags a skill the course does not teach yet as AHEAD, on the row itself', async () => {
+    await renderWithReadiness();
+    // reason-about-models is learnedIn ['L2']; the builder is in L1.
+    expect(screen.getByText(/Ahead · L2/)).toBeInTheDocument();
+  });
+
+  it('shows the distribution bar, with unassessed skills as their own segment', async () => {
+    await renderWithReadiness();
+    expect(screen.getByText(/Bar width = share of assessed skills/)).toBeInTheDocument();
+    expect(screen.getByTitle(/skills the curriculum hasn't reached yet/)).toBeInTheDocument();
+  });
+
+  it('explains the confidence ticks — an unlabelled meter is not a signal', async () => {
+    await renderWithReadiness();
+    expect(screen.getByText(/how consistently the grader agrees/)).toBeInTheDocument();
+    expect(screen.getByText(/graded observations/)).toBeInTheDocument();
+  });
+});
+
+describe('evidenceCaveat', () => {
+  it('calls out a level resting on a single observation', () => {
+    expect(evidenceCaveat({ observations: 1, confidence: 1 })).toMatchObject({ label: 'Thin evidence' });
+    expect(evidenceCaveat({ observations: 0, confidence: null })).toMatchObject({ label: 'Thin evidence' });
+  });
+
+  it('calls out a level most of the window disagrees with', () => {
+    // 7 of 10 observations sitting somewhere else is not a settled level.
+    expect(evidenceCaveat({ observations: 10, confidence: 0.3 })).toMatchObject({ label: 'Mixed evidence' });
+  });
+
+  it('stays quiet when the evidence is actually solid', () => {
+    expect(evidenceCaveat({ observations: 4, confidence: 1 })).toBeNull();
+    expect(evidenceCaveat({ observations: 4, confidence: 0.5 })).toBeNull();
+  });
+
+  it('thin evidence wins over mixed — the smaller sample is the bigger caveat', () => {
+    expect(evidenceCaveat({ observations: 1, confidence: 0.2 })).toMatchObject({ label: 'Thin evidence' });
+  });
+});
+
+describe('Story cards', () => {
+  it('collapses the prose blocks that made the cards unreadable', async () => {
+    await renderRealShape();
+    // All three cards offer the fold; the text is never truncated away.
+    expect(screen.getAllByRole('button', { name: /Read the full profile/ }).length).toBe(3);
+    expect(screen.getByText('How to coach them')).toBeInTheDocument();
+    expect(screen.getAllByText('Self-reported at intake').length).toBe(2);
+  });
+
+  it('expands one card without touching the others', async () => {
+    await renderRealShape();
+    const [first] = screen.getAllByRole('button', { name: /Read the full profile/ });
+    fireEvent.click(first);
+    expect(screen.getByRole('button', { name: /Show less/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Read the full profile/ }).length).toBe(2);
   });
 });

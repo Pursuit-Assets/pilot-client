@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { BookOpen, Target, Brain } from 'lucide-react';
 
@@ -31,42 +31,57 @@ const TEACHING_METHOD_LABEL = {
   demonstration: 'Example-Based', // legacy alias
 };
 
-const StoryCard = ({ icon: Icon, title, accent, accentBg, children, empty }) => (
-  <article
-    className="
-      group relative overflow-hidden
-      rounded-2xl bg-white
-      ring-1 ring-[#E3E3E3]
-      shadow-sm hover:shadow-md
-      transition-all duration-200
-      p-6
-      flex flex-col
-    "
-  >
+/**
+ * StoryCard — a narrow card with a coloured left rail.
+ *
+ * Prose is COLLAPSED by default (2026-08-07). These three cards carried 600-1300
+ * characters of markdown each, side by side, which is unreadable at column width
+ * and was the original complaint about this page. The eyebrow says where the
+ * content came from, a few lines show, and the rest is one click away — the text
+ * is never truncated away, just folded.
+ */
+const StoryCard = ({ icon: Icon, title, eyebrow, accent, accentBg, children, empty, collapsible = true }) => {
+  const [open, setOpen] = useState(false);
+  return (
+  <article className="group relative overflow-hidden rounded-2xl bg-white ring-1 ring-[#E3E3E3] shadow-[0_2px_4px_rgba(0,0,0,.05)] p-5 md:p-6 flex flex-col">
     {/* Accent rail on the left edge */}
     <div
       aria-hidden="true"
       className="absolute inset-y-0 left-0 w-1"
       style={{ backgroundColor: accent }}
     />
-    <header className="flex items-center gap-3">
-      <div
-        className="
-          w-9 h-9 rounded-lg flex items-center justify-center shrink-0
-        "
-        style={{ backgroundColor: accentBg }}
-      >
-        <Icon className="w-5 h-5" style={{ color: accent }} />
+    <header className="flex items-center gap-2.5">
+      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: accentBg }}>
+        <Icon className="w-4 h-4" style={{ color: accent }} />
       </div>
-      <h3 className="text-base font-proxima-bold text-[#1E1E1E]">{title}</h3>
+      <div>
+        <h3 className="text-[13px] font-proxima-bold text-[#1E1E1E] leading-tight">{title}</h3>
+        {eyebrow && (
+          <div className="text-[10px] uppercase tracking-wider text-[#AAA] font-proxima-bold mt-[1px]">{eyebrow}</div>
+        )}
+      </div>
     </header>
-    <div className="mt-4 flex-1 text-sm leading-relaxed text-[#1E1E1E]/85 font-proxima">
-      {children || (
-        <p className="italic text-[#999]">{empty || 'Not yet captured.'}</p>
-      )}
+    <div
+      className={`mt-3 flex-1 text-[13px] leading-relaxed text-[#1E1E1E]/85 font-proxima ${
+        collapsible && !open ? 'line-clamp-4' : ''
+      }`}
+    >
+      {children || <p className="italic text-[#999]">{empty || 'Not yet captured.'}</p>}
     </div>
+    {collapsible && children && (
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mt-2.5 self-start text-[11.5px] font-proxima-bold hover:underline"
+        style={{ color: accent }}
+        aria-expanded={open}
+      >
+        {open ? 'Show less' : 'Read the full profile →'}
+      </button>
+    )}
   </article>
-);
+  );
+};
 
 const Markdown = ({ children }) => (
   <ReactMarkdown
@@ -102,6 +117,7 @@ const BuilderSnapshotStoryGrid = ({ profile }) => {
       <StoryCard
         icon={BookOpen}
         title="Background"
+        eyebrow="Self-reported at intake"
         accent="#4242EA"
         accentBg="rgba(66, 66, 234, 0.08)"
       >
@@ -111,6 +127,7 @@ const BuilderSnapshotStoryGrid = ({ profile }) => {
       <StoryCard
         icon={Target}
         title="Goals"
+        eyebrow="Self-reported at intake"
         accent="#FF33FF"
         accentBg="rgba(255, 51, 255, 0.08)"
       >
@@ -119,7 +136,8 @@ const BuilderSnapshotStoryGrid = ({ profile }) => {
 
       <StoryCard
         icon={Brain}
-        title="Learning Style"
+        title="How to coach them"
+        eyebrow="Derived from graded sessions"
         accent="#FB923C"
         accentBg="rgba(251, 146, 60, 0.10)"
       >
