@@ -7,6 +7,7 @@ import {
   FileText, CheckCircle, MessageSquarePlus, Plus,
 } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 import { cachedAdminApi } from '../../../services/cachedAdminApi';
 import BuilderLogModal from './BuilderLogModal';
 import { ENROLLMENT_BADGE, ENROLLMENT_LABELS } from '../utils/sharedComponents';
@@ -27,6 +28,10 @@ const EXCUSE_REASONS = ['Sick', 'Personal', 'Program Event', 'Technical Issue', 
 
 const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts, onBuilderClick, onAttendanceChange }) => {
   const token = useAuthStore((s) => s.token);
+  // Read-only accounts (interview candidates) can read the to-do list — knowing who needs
+  // attention is the point of their exercise — but every action on it is withheld, since
+  // the server refuses those writes.
+  const { isReadOnly } = usePermissions();
   const [open, setOpen] = useState(() => localStorage.getItem('pursuit_todos_open') !== 'false');
   const [nextStepLogs, setNextStepLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -327,7 +332,10 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
     setSavingEnrollment(null);
   };
 
-  const todoCount = nextStepLogs.length + unverifiedDays.length + (enrollmentNeedsVerification ? 1 : 0);
+  // Read-only accounts don't get the verification sections at all (see below), so they
+  // must not be counted here either — otherwise the badge promises to-dos that aren't shown.
+  const todoCount = nextStepLogs.length
+    + (isReadOnly ? 0 : unverifiedDays.length + (enrollmentNeedsVerification ? 1 : 0));
 
   return (
     <>
@@ -339,16 +347,18 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
             {todoCount > 0 && <Badge className="bg-red-100 text-red-600 text-[10px]">{todoCount}</Badge>}
           </div>
           <div className="flex items-center gap-1.5">
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => { e.stopPropagation(); setShowLogModal(true); }}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setShowLogModal(true); } }}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-slate-500 hover:text-[#4242EA] hover:bg-[#EFEFEF] transition-colors cursor-pointer"
-              title="Add builder log"
-            >
-              <Plus size={11} /> Log
-            </span>
+            {!isReadOnly && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); setShowLogModal(true); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setShowLogModal(true); } }}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-slate-500 hover:text-[#4242EA] hover:bg-[#EFEFEF] transition-colors cursor-pointer"
+                title="Add builder log"
+              >
+                <Plus size={11} /> Log
+              </span>
+            )}
             {open ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
           </div>
         </CollapsibleTrigger>
@@ -356,7 +366,7 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
         <CollapsibleContent>
           <div className="border-t border-[#E3E3E3] divide-y divide-[#EFEFEF]">
             {/* Attendance verification reminders */}
-            {unverifiedDays.length > 0 && (
+            {unverifiedDays.length > 0 && !isReadOnly && (
               <div className="px-4 py-3">
                 <div className="flex items-center gap-1.5 mb-2">
                   <CalendarCheck size={12} className="text-amber-500" />
@@ -379,7 +389,7 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
             )}
 
             {/* Enrollment verification */}
-            {enrollmentNeedsVerification && (
+            {enrollmentNeedsVerification && !isReadOnly && (
               <div className="px-4 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <ShieldCheck size={12} className="text-amber-500" />
@@ -440,30 +450,33 @@ const FacilitatorTodos = ({ selectedDate, selectedCohortId, cohortName, cohorts,
                                 <span className="text-[10px] text-slate-400">Saving...</span>
                               ) : (
                                 <select value={log.status}
+                                  disabled={isReadOnly}
                                   onChange={e => handleLogStatusChange(log.log_id, e.target.value)}
-                                  className="text-[10px] border border-[#E3E3E3] rounded px-1.5 py-0.5 bg-white cursor-pointer focus:outline-none">
+                                  className={`text-[10px] border border-[#E3E3E3] rounded px-1.5 py-0.5 bg-white focus:outline-none ${isReadOnly ? 'appearance-none cursor-default' : 'cursor-pointer'}`}>
                                   <option value="open">Open</option>
                                   <option value="in_progress">In Progress</option>
                                   <option value="closed">Closed</option>
                                 </select>
                               )}
                             </div>
-                            <div className="flex gap-1.5">
-                              <input type="text"
-                                value={logNoteInputs[log.log_id] || ''}
-                                onChange={e => setLogNoteInputs(prev => ({ ...prev, [log.log_id]: e.target.value }))}
-                                placeholder="Add update or comment..."
-                                className="flex-1 px-2 py-1 text-xs border border-[#E3E3E3] rounded bg-white focus:border-[#4242EA] focus:outline-none"
-                                onClick={e => e.stopPropagation()}
-                                onKeyDown={e => e.key === 'Enter' && handleAddLogNote(log.log_id)}
-                              />
-                              <button onClick={e => { e.stopPropagation(); handleAddLogNote(log.log_id); }}
-                                disabled={logNoteSaving === log.log_id || !logNoteInputs[log.log_id]?.trim()}
-                                className="px-2 py-1 text-xs bg-[#4242EA] text-white rounded hover:bg-[#3535c8] disabled:opacity-50 flex items-center gap-1">
-                                <MessageSquarePlus size={10} />
-                                {logNoteSaving === log.log_id ? '...' : 'Add'}
-                              </button>
-                            </div>
+                            {!isReadOnly && (
+                              <div className="flex gap-1.5">
+                                <input type="text"
+                                  value={logNoteInputs[log.log_id] || ''}
+                                  onChange={e => setLogNoteInputs(prev => ({ ...prev, [log.log_id]: e.target.value }))}
+                                  placeholder="Add update or comment..."
+                                  className="flex-1 px-2 py-1 text-xs border border-[#E3E3E3] rounded bg-white focus:border-[#4242EA] focus:outline-none"
+                                  onClick={e => e.stopPropagation()}
+                                  onKeyDown={e => e.key === 'Enter' && handleAddLogNote(log.log_id)}
+                                />
+                                <button onClick={e => { e.stopPropagation(); handleAddLogNote(log.log_id); }}
+                                  disabled={logNoteSaving === log.log_id || !logNoteInputs[log.log_id]?.trim()}
+                                  className="px-2 py-1 text-xs bg-[#4242EA] text-white rounded hover:bg-[#3535c8] disabled:opacity-50 flex items-center gap-1">
+                                  <MessageSquarePlus size={10} />
+                                  {logNoteSaving === log.log_id ? '...' : 'Add'}
+                                </button>
+                              </div>
+                            )}
                             <div className="flex items-center gap-1 text-[10px] text-slate-400">
                               <span>Created {new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                               <span>by {log.created_by_name}</span>

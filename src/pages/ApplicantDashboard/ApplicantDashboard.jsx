@@ -939,7 +939,7 @@ function ApplicantDashboard() {
         <div className="max-w-[550px]">
           <h1 
             className="text-3xl md:text-[3rem] text-[#1E1E1E] leading-[1.15] tracking-tight"
-            style={{ fontFamily: "'Proxima Nova Bold', 'Proxima Nova', sans-serif" }}
+            style={{ fontFamily: 'var(--font-family-bold)' }}
           >
             Start your AI-Native<br className="hidden md:block" />
             {' '}journey by completing<br className="hidden md:block" />

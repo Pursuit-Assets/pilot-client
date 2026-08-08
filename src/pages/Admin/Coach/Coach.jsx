@@ -12,8 +12,12 @@ import TeachingLab from '../TeachingLab/TeachingLab';
 import LearnerProfiles from '../LearnerProfiles/LearnerProfiles';
 import CohortInsights from '../CohortInsights/CohortInsights';
 
+// Every tab keeps the SAME font-weight (font-medium) in every state — the
+// active tab is distinguished by the purple fill, not by going bold. Changing
+// weight on activation reflowed the pill widths and shifted the whole bar, so
+// weight is held constant to keep the nav rock-steady on click/focus.
 const TAB_TRIGGER_CLASS =
-  'data-[state=active]:bg-[#4242EA] data-[state=active]:text-white text-slate-700 font-medium font-proxima px-4 py-1.5 text-sm rounded-md transition-all';
+  'data-[state=active]:bg-[#4242EA] data-[state=active]:text-white text-slate-500 hover:text-[#1E1E1E] font-medium font-proxima px-4 py-1.5 text-[13px] rounded-md transition-colors focus:outline-none';
 
 /**
  * Coach — combined admin surface for the v2 coach agent, with tabs for
@@ -101,11 +105,11 @@ const Coach = () => {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#EFEFEF] font-proxima">
       <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col flex-1 min-h-0">
-        <div className="shrink-0 bg-white border-b border-[#E3E3E3] px-6 py-2.5 flex items-center gap-4">
+        <div className="shrink-0 border-b border-[#E3E3E3] px-6 py-2.5 flex items-center gap-4">
           {!isSecondaryNavPage && (
             <h1 className="text-base font-bold text-[#1E1E1E] shrink-0">Coach</h1>
           )}
-          <TabsList className="bg-slate-50 border border-[#E3E3E3] p-1 rounded-lg inline-flex gap-0.5 h-auto">
+          <TabsList className="inline-flex gap-1 h-auto bg-transparent p-0">
             {canRuns && <TabsTrigger value="runs" className={TAB_TRIGGER_CLASS}>Coach Runs</TabsTrigger>}
             {canEvals && <TabsTrigger value="evals" className={TAB_TRIGGER_CLASS}>Coach Evals</TabsTrigger>}
             {canInsights && <TabsTrigger value="insights" className={TAB_TRIGGER_CLASS}>Cohort Insights</TabsTrigger>}

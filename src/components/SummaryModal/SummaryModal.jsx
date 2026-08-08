@@ -4,6 +4,14 @@ import ReactMarkdown from 'react-markdown';
 import { useNavigate, useLocation } from 'react-router-dom';
 import useAuthStore from '../../stores/authStore';
 import './SummaryModal.css';
+import { createCodeRenderers } from '../markdown/codeRenderers';
+
+// The fenced-block styling lives on the container now, so it moves from the
+// `code` element onto `pre` — same CSS class, same rendering.
+const codeRenderers = createCodeRenderers({
+  inlineClassName: 'summary-modal__inline-code',
+  preClassName: 'summary-modal__code-block',
+});
 
 function SummaryModal({ 
   isOpen, 
@@ -249,11 +257,8 @@ function SummaryModal({
                     em: ({node, children, ...props}) => (
                       <em className="summary-modal__italic" {...props}>{children}</em>
                     ),
-                    code: ({node, inline, children, ...props}) => (
-                      inline ? 
-                        <code className="summary-modal__inline-code" {...props}>{children}</code> :
-                        <code className="summary-modal__code-block" {...props}>{children}</code>
-                    )
+                    code: codeRenderers.code,
+                    pre: codeRenderers.pre
                   }}
                 >
                   {summary}

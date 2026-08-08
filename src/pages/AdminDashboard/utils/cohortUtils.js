@@ -30,6 +30,42 @@ export const fetchPursuitBuilderCohorts = async (token) => {
 };
 
 /**
+ * Which cohort the Cohort Hub should land on when the viewer has no saved choice.
+ *
+ * Prefers the most recent **L1 that actually has builders enrolled**. Recency alone is
+ * wrong — the next cohort is created and sits at zero enrollment for weeks before it
+ * starts, so a plain "newest" rule lands on an empty dashboard. Level alone is wrong for
+ * the same reason in reverse: a finished cohort still has enrollments.
+ *
+ * This replaced a hardcoded `DEFAULT_COHORT_NAME = 'March 2026 L1'`, which had gone stale
+ * — that cohort finished in May and is down to 3 enrollments, so everyone without a saved
+ * choice (including interview candidates) landed on a completed cohort.
+ *
+ * Degrades for programs that have no L1 at all (Goldman Sachs Pilot, LaGCC, UFT…):
+ * newest enrolled cohort of any level, then simply the newest cohort.
+ *
+ * Expects rows from `GET /api/admin/dashboard/program-cohorts` (`cohort_id`, `level`,
+ * `start_date`, `enrolled_count`). Sorts defensively rather than trusting the endpoint's
+ * ORDER BY.
+ *
+ * @param {Array} cohorts
+ * @returns {string} cohort_id, or '' when the list is empty
+ */
+export const pickDefaultCohortId = (cohorts = []) => {
+  const newestFirst = [...cohorts].sort(
+    (a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0)
+  );
+  const enrolled = newestFirst.filter((c) => Number(c.enrolled_count) > 0);
+
+  const chosen =
+    enrolled.find((c) => c.level === 'L1') ||
+    enrolled[0] ||
+    newestFirst[0];
+
+  return chosen?.cohort_id || '';
+};
+
+/**
  * Convert org management name to legacy API format.
  * "December 2025 L1" → "December 2025 - L1"
  * "March 2025 L3+" → "March 2025 - L3+"

@@ -6,12 +6,15 @@ import { listSuites, runEval, listBatches, getBatch, getCase } from '../../../se
 import { SkillAssessmentTable, gradeReason, topLevel, levelLabel, GRADE_ERROR_TEXT } from '../coachDreyfus';
 import { LLM_MODELS } from '../../../constants/llmModels';
 
-const BRAND = '#4242EA';
+// ── Pursuit design tokens ────────────────────────────────────────────────────
+const BRAND = '#4242EA';        // Pursuit Purple
+const BRAND_HOVER = '#3535C7';
+const CARD = 'bg-white rounded-[18px] border border-[#E3E3E3] shadow-[0_2px_4px_rgba(0,0,0,0.05)]';
 
 // The 8 judge dimensions (coachEvalJudges.js). teaching_method_adherence and
 // remediation are CONDITIONAL — they only score when the run had a declared
-// teaching style / actually remediated; when absent the case detail shows a
-// muted "not scored" row rather than silently dropping them.
+// teaching style / actually remediated; when absent we show a muted "not scored"
+// row rather than silently dropping them.
 const DIMENSION_LABELS = {
   teaching: 'Teaching',
   teaching_method_adherence: 'Method adherence',
@@ -26,32 +29,14 @@ const DIMENSION_LABELS = {
 // Why a dimension is absent — shown on the muted "not scored" row so "not
 // applicable to this run" reads differently from "we forgot to measure it".
 const DIMENSION_ABSENT_REASON = {
-  teaching_method_adherence: 'builder has no declared teaching style',
-  remediation: 'builder passed first attempt — no remediation turn',
-  grading_consistency: 're-grade sampling did not produce a stable signal',
-};
-
-// Short, unambiguous labels for the compact per-case dimension chips.
-// (The slice(0,4) approach collapsed "Grading quality" and "Grading
-// consistency" both to "Grad".)
-const DIMENSION_SHORT = {
-  teaching: 'Teach',
-  teaching_method_adherence: 'Method',
-  challenge_design: 'Chall',
-  grading_quality: 'Grade',
-  grading_consistency: 'Consist',
-  remediation: 'Remed',
-  completion: 'Compl',
-  end_to_end: 'E2E',
+  teaching_method_adherence: 'no declared teaching style',
+  remediation: 'passed first attempt — no remediation turn',
+  grading_consistency: 're-grade sampling produced no stable signal',
 };
 
 // grading_consistency is objective (computed level-stability), not an LLM
 // opinion — flag it so reviewers read its score differently.
 const OBJECTIVE_DIMENSIONS = new Set(['grading_consistency']);
-
-// The Coach model + Judge model pickers reuse the shared LLM_MODELS roster
-// (imported above) so they stay in sync with the Learning/GPT pickers; blank =
-// production default. See the run-bar <select>s below.
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString() : '—');
 const scoreTone = (s) => (s == null ? 'slate' : s >= 80 ? 'green' : s >= 60 ? 'amber' : 'red');
@@ -61,6 +46,7 @@ const TONES = {
   green: 'bg-emerald-100 text-emerald-700 border-emerald-300',
   amber: 'bg-amber-100 text-amber-700 border-amber-300',
   red: 'bg-rose-100 text-rose-700 border-rose-300',
+  purple: 'bg-[#4242EA]/10 text-[#4242EA] border-[#4242EA]/20',
 };
 
 const Chip = ({ children, tone = 'slate' }) => (
@@ -69,32 +55,95 @@ const Chip = ({ children, tone = 'slate' }) => (
   </span>
 );
 
+// Status uses purple for "done" (brand), amber for running, rose for failed —
+// distinct from scoreTone, which colors 0–100 judge scores.
 const StatusBadge = ({ status }) => {
-  const tone = status === 'done' ? 'green' : status === 'failed' ? 'red' : 'amber';
+  const tone = status === 'done' ? 'purple' : status === 'failed' ? 'red' : 'amber';
   return <Chip tone={tone}>{status}</Chip>;
+};
+
+// ALL-CAPS letter-spaced section label (Pursuit style).
+const Caps = ({ children, className = '' }) => (
+  <div className={`text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 ${className}`}>{children}</div>
+);
+
+/** Styled select matching the Figma control boxes — native chrome stripped
+ *  (appearance-none), a custom chevron, hairline border, 8px radius, purple
+ *  focus ring. */
+const SelectField = ({ label, value, onChange, widthClass = 'w-56', children }) => (
+  <label className={`flex flex-col gap-1.5 ${widthClass}`}>
+    <Caps>{label}</Caps>
+    <div className="relative">
+      <select
+        value={value}
+        onChange={onChange}
+        className="w-full appearance-none rounded-lg border border-[#E3E3E3] bg-white pl-3 pr-9 py-2.5 text-sm text-[#1E1E1E] cursor-pointer transition-colors hover:border-[#C8C8C8] focus:outline-none focus:border-[#4242EA] focus:ring-2 focus:ring-[#4242EA]/15"
+      >
+        {children}
+      </select>
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">▾</span>
+    </div>
+  </label>
+);
+
+/** KPI stat card with the signature 7px purple top bar + big numeral. */
+const StatCard = ({ label, value, sub, accent, warn }) => (
+  <div className="flex-1 min-w-0 overflow-hidden bg-white rounded-[14px] border border-[#E3E3E3] shadow-[0_2px_4px_rgba(0,0,0,0.05)]">
+    <div className="h-1.5" style={{ backgroundColor: BRAND }} />
+    <div className="p-4">
+      <Caps>{label}</Caps>
+      <div className="mt-1 text-[30px] font-bold leading-none" style={{ color: accent ? BRAND : warn ? '#C73A3A' : '#1E1E1E' }}>{value}</div>
+      {sub && <div className="mt-1.5 text-[11px] text-slate-400">{sub}</div>}
+    </div>
+  </div>
+);
+
+/** One dimension's aggregate score as a labeled bar (the scannable replacement
+ *  for the old chip soup). Null score → muted "not scored" with a reason. */
+const DimensionBar = ({ dim, score }) => {
+  const objective = OBJECTIVE_DIMENSIONS.has(dim);
+  return (
+    <div className="flex items-center gap-3">
+      <div className="w-[190px] shrink-0 flex items-center gap-1.5">
+        <span className="text-[13px] font-medium text-slate-700">{DIMENSION_LABELS[dim] || dim}</span>
+        {objective && (
+          <span className="text-[8px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 rounded-full px-1.5 py-0.5">objective</span>
+        )}
+      </div>
+      {score == null ? (
+        <span className="text-xs italic text-slate-400">not scored · {DIMENSION_ABSENT_REASON[dim] || 'n/a for this run'}</span>
+      ) : (
+        <>
+          <div className="flex-1 h-2.5 rounded-full bg-[#E3E3E3]/70 overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, score))}%`, backgroundColor: BRAND }} />
+          </div>
+          <span className={`w-8 shrink-0 text-right text-[13px] font-semibold ${score < 75 ? 'text-rose-600' : 'text-slate-800'}`}>{score}</span>
+        </>
+      )}
+    </div>
+  );
 };
 
 /**
  * The COACH's own Dreyfus grade for the case — the artifact the grading_quality
  * judge is judging. Sourced from the run's latest grade step (attached to the
  * case by the server as `coachGrade`). Shown next to the judge verdicts so a
- * reviewer can see what was graded, not just the opinion of it.
+ * reviewer sees what was graded, not just the opinion of it.
  */
 const CoachGradePanel = ({ grade }) => {
-  if (!grade) return null;
-  const assessments = Array.isArray(grade.skillAssessments) ? grade.skillAssessments : [];
+  const assessments = Array.isArray(grade?.skillAssessments) ? grade.skillAssessments : [];
   const top = topLevel(assessments);
   return (
-    <div className="border border-[#E3E3E3] rounded-lg bg-[#FBFBFE] p-3 mb-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">What the coach graded</div>
-      {grade.gradeError ? (
-        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">{GRADE_ERROR_TEXT}</div>
+    <div>
+      <Caps className="mb-2">What the coach graded</Caps>
+      {!grade ? (
+        <p className="text-xs text-slate-400 italic">No coach grade recorded for this case.</p>
+      ) : grade.gradeError ? (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{GRADE_ERROR_TEXT}</div>
       ) : (
         <>
           <div className="flex items-center gap-2 mb-2 flex-wrap">
-            {grade.passed
-              ? <Chip tone="green">✓ passed</Chip>
-              : <Chip tone="red">✗ not passed</Chip>}
+            {grade.passed ? <Chip tone="purple">✓ passed</Chip> : <Chip tone="red">✗ not passed</Chip>}
             {gradeReason(grade) && <span className="text-xs text-slate-600">{gradeReason(grade)}</span>}
             {top != null && <Chip tone="slate">🏅 {levelLabel(top)}</Chip>}
             {grade.gradeSamples > 1 && <Chip tone="slate">consensus of {grade.gradeSamples} re-grades</Chip>}
@@ -108,8 +157,8 @@ const CoachGradePanel = ({ grade }) => {
   );
 };
 
-/** Per-case verdict detail panel. */
-const CaseDetail = ({ token, caseId, onClose, onViewTimeline }) => {
+/** Expanded per-case detail: coach's Dreyfus grade beside the judge verdicts. */
+const CaseDetail = ({ token, caseId, onViewTimeline }) => {
   const [c, setC] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -120,71 +169,68 @@ const CaseDetail = ({ token, caseId, onClose, onViewTimeline }) => {
     return () => { live = false; };
   }, [token, caseId]);
 
-  if (loading) return <div className="p-4 text-slate-400 text-sm">Loading case…</div>;
+  if (loading) return <div className="px-4 py-4 text-slate-400 text-sm">Loading case…</div>;
   if (!c) return null;
 
   const dims = c.dimension_scores || {};
   const reasons = c.judge_reasoning || {};
 
   return (
-    <div className="border border-[#E3E3E3] rounded-lg bg-white p-4 mt-3">
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-sm font-semibold text-slate-800">
-          {c.persona_key} · task {c.task_id}
-          {c.overall_score != null && <span className="ml-2"><Chip tone={scoreTone(c.overall_score)}>overall {c.overall_score}</Chip></span>}
-        </div>
-        <div className="flex items-center gap-3">
-          {c.thread_id && (onViewTimeline ? (
-            <button onClick={() => onViewTimeline(c.thread_id)} className="text-xs font-medium" style={{ color: BRAND }}>
-              View agent timeline →
-            </button>
-          ) : (
-            <Link to={`/admin/coach?tab=runs&thread=${c.thread_id}`} className="text-xs font-medium" style={{ color: BRAND }}>
-              View agent timeline →
-            </Link>
-          ))}
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
-        </div>
+    <div className="border-t border-[#EEE] bg-[#FBFBFE] px-4 py-4">
+      <div className="flex items-center justify-end mb-3">
+        {c.thread_id && (onViewTimeline ? (
+          <button onClick={() => onViewTimeline(c.thread_id)} className="text-xs font-semibold" style={{ color: BRAND }}>
+            View agent timeline →
+          </button>
+        ) : (
+          <Link to={`/admin/coach?tab=runs&thread=${c.thread_id}`} className="text-xs font-semibold" style={{ color: BRAND }}>
+            View agent timeline →
+          </Link>
+        ))}
       </div>
 
-      {c.error && <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded px-3 py-2 mb-3">{c.error}</div>}
+      {c.error && <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-3">{c.error}</div>}
 
-      <CoachGradePanel grade={c.coachGrade} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <CoachGradePanel grade={c.coachGrade} />
 
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Judge verdicts</div>
-      <div className="space-y-2">
-        {Object.keys(DIMENSION_LABELS).map((d) => {
-          const dim = dims[d];
-          if (!dim) {
-            return (
-              <div key={d} className="border border-dashed border-[#EEE] rounded-md p-3 opacity-70">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-semibold text-slate-500">{DIMENSION_LABELS[d]}</span>
-                  <Chip tone="slate">not scored</Chip>
-                  {DIMENSION_ABSENT_REASON[d] && <span className="text-[11px] text-slate-400 italic">{DIMENSION_ABSENT_REASON[d]}</span>}
+        <div>
+          <Caps className="mb-2">Judge verdicts</Caps>
+          <div className="space-y-2">
+            {Object.keys(DIMENSION_LABELS).map((d) => {
+              const dim = dims[d];
+              if (!dim) {
+                return (
+                  <div key={d} className="border border-dashed border-[#E3E3E3] rounded-lg px-3 py-2 opacity-70">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-slate-500">{DIMENSION_LABELS[d]}</span>
+                      <Chip tone="slate">not scored</Chip>
+                      {DIMENSION_ABSENT_REASON[d] && <span className="text-[11px] text-slate-400 italic">{DIMENSION_ABSENT_REASON[d]}</span>}
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div key={d} className="border border-[#EEE] rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-700">{DIMENSION_LABELS[d]}</span>
+                    {OBJECTIVE_DIMENSIONS.has(d) && <Chip tone="slate">objective</Chip>}
+                    <Chip tone={scoreTone(dim.score)}>{dim.score}</Chip>
+                    {dim.pass ? <Chip tone="purple">pass</Chip> : <Chip tone="red">review</Chip>}
+                  </div>
+                  {reasons[d]?.reasoning && <p className="text-xs text-slate-600">{reasons[d].reasoning}</p>}
+                  {reasons[d]?.evidence && <p className="text-[11px] text-slate-400 mt-1 italic">{reasons[d].evidence}</p>}
                 </div>
-              </div>
-            );
-          }
-          return (
-            <div key={d} className="border border-[#EEE] rounded-md p-3">
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <span className="text-xs font-semibold text-slate-700">{DIMENSION_LABELS[d]}</span>
-                {OBJECTIVE_DIMENSIONS.has(d) && <Chip tone="slate">objective</Chip>}
-                <Chip tone={scoreTone(dim.score)}>{dim.score}</Chip>
-                {dim.pass ? <Chip tone="green">pass</Chip> : <Chip tone="red">fail</Chip>}
-              </div>
-              {reasons[d]?.reasoning && <p className="text-xs text-slate-600">{reasons[d].reasoning}</p>}
-              {reasons[d]?.evidence && <p className="text-[11px] text-slate-400 mt-1 italic">{reasons[d].evidence}</p>}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
-/** Selected batch: cases table + case detail. */
+/** Selected batch: header · KPI stat row · dimension performance · cases. */
 const BatchDetail = ({ token, batchId, onViewTimeline }) => {
   const [data, setData] = useState(null);
   const [openCase, setOpenCase] = useState(null);
@@ -194,7 +240,7 @@ const BatchDetail = ({ token, batchId, onViewTimeline }) => {
     setData(d);
   }, [token, batchId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); setOpenCase(null); }, [load]);
 
   // Poll while the batch is still running.
   useEffect(() => {
@@ -203,80 +249,94 @@ const BatchDetail = ({ token, batchId, onViewTimeline }) => {
     return () => clearInterval(id);
   }, [data, load]);
 
-  if (!data) return <div className="p-6 text-slate-400 text-sm">Loading batch…</div>;
+  if (!data) return <div className={`${CARD} p-6 text-slate-400 text-sm`}>Loading batch…</div>;
   const { batch, cases } = data;
   const agg = batch.aggregate_scores || {};
+  const dims = agg.dimensions || {};
+  const failed = cases.filter((c) => c.status === 'failed').length;
+  const passPct = agg.pass_rate != null ? Math.round(agg.pass_rate * 100) : null;
+  const snap = batch.prompt_snapshot;
 
   return (
-    <div className="p-6">
-      <div className="flex items-center gap-3 mb-1">
-        <h2 className="text-lg font-bold text-[#1E1E1E]">Batch #{batch.id} · {batch.suite_key}</h2>
+    <div className="space-y-5">
+      {/* header */}
+      <div className="flex items-center gap-2.5 flex-wrap">
+        <h2 className="text-xl font-bold text-[#1E1E1E]">Batch #{batch.id} · {batch.suite_key}</h2>
         <StatusBadge status={batch.status} />
-        <span className="text-xs text-slate-400">{batch.completed_cases}/{batch.total_cases} cases</span>
+        {snap ? (
+          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+            🧊 Frozen prompts
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+            ⚠️ Legacy — live prompts
+          </span>
+        )}
+        <span className="ml-auto text-xs text-slate-400">
+          {fmtTime(batch.started_at)} · judge {batch.judge_model || 'default'}{batch.model_under_test ? ` · coach ${batch.model_under_test}` : ''}
+        </span>
       </div>
-      <p className="text-xs text-slate-500 mb-2">
-        {fmtTime(batch.started_at)} · model {batch.model_under_test || 'default'} · judge {batch.judge_model || 'default'}
-      </p>
-      {batch.prompt_snapshot ? (
-        <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-3 py-1.5 inline-flex items-center gap-1.5 mb-4">
-          <span aria-hidden>🧊</span>
-          Frozen prompts — {Object.keys(batch.prompt_snapshot.v2_templates || {}).length} templates,{' '}
-          {Object.keys(batch.prompt_snapshot.v2_config || {}).length} config values,{' '}
-          {Object.keys(batch.prompt_snapshot.skill_taxonomy?.skills || {}).length} skills
-          {batch.prompt_snapshot.captured_at && (
-            <span className="text-emerald-600/70 ml-1">· captured {fmtTime(batch.prompt_snapshot.captured_at)}</span>
-          )}
-        </p>
-      ) : (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5 inline-flex items-center gap-1.5 mb-4">
-          <span aria-hidden>⚠️</span>
-          No prompt snapshot — scores reflect live values, not a frozen baseline (legacy batch).
-        </p>
-      )}
 
-      {batch.status === 'done' && (
-        <div className="flex flex-wrap gap-4 mb-5 bg-[#F7F7F9] border border-[#E3E3E3] rounded-lg px-4 py-3 text-xs">
-          <div><span className="text-slate-400">Overall</span> <span className="font-semibold text-slate-700">{agg.overall ?? '—'}</span></div>
-          <div><span className="text-slate-400">Pass rate</span> <span className="font-semibold text-slate-700">{agg.pass_rate != null ? `${Math.round(agg.pass_rate * 100)}%` : '—'}</span></div>
-          {agg.dimensions && Object.entries(agg.dimensions).map(([d, s]) => (
-            <div key={d}><span className="text-slate-400">{DIMENSION_LABELS[d] || d}</span> <span className="font-semibold text-slate-700">{s}</span></div>
-          ))}
+      {batch.error && <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{batch.error}</div>}
+
+      {/* KPI stat cards */}
+      <div className="flex gap-4">
+        <StatCard label="Overall score" value={agg.overall ?? '—'} sub="judge mean" accent />
+        <StatCard label="Pass rate" value={passPct != null ? `${passPct}%` : '—'} sub={`${cases.filter((c) => c.passed).length} of ${cases.length} cases`} />
+        <StatCard label="Cases" value={`${batch.completed_cases}/${batch.total_cases}`} sub={batch.status === 'running' ? 'running…' : 'complete'} />
+        <StatCard label="Failed cases" value={failed} sub="errored / timed out" warn={failed > 0} />
+      </div>
+
+      {/* dimension performance */}
+      {agg.dimensions && (
+        <div className={`${CARD} p-5`}>
+          <Caps>Dimension performance</Caps>
+          <p className="text-xs text-slate-400 mt-0.5 mb-4">Judge scores across the 8 rubric dimensions (0–100)</p>
+          <div className="space-y-3.5">
+            {Object.keys(DIMENSION_LABELS).map((d) => (
+              <DimensionBar key={d} dim={d} score={dims[d] ?? null} />
+            ))}
+          </div>
         </div>
       )}
-      {batch.error && <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded px-3 py-2 mb-4">{batch.error}</div>}
 
-      <table className="w-full text-xs border border-[#E3E3E3] rounded-md overflow-hidden">
-        <thead className="bg-[#F7F7F9] text-slate-600">
-          <tr>
-            <th className="text-left px-3 py-2 font-semibold">Persona</th>
-            <th className="text-left px-3 py-2 font-semibold">Task</th>
-            <th className="text-left px-3 py-2 font-semibold">Status</th>
-            <th className="text-left px-3 py-2 font-semibold">Overall</th>
-            <th className="text-left px-3 py-2 font-semibold">Dimensions</th>
-            <th className="px-3 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {cases.map((c) => (
-            <tr key={c.id} className="border-t border-[#EEE] hover:bg-[#F7F7F9] cursor-pointer" onClick={() => setOpenCase(openCase === c.id ? null : c.id)}>
-              <td className="px-3 py-2 text-slate-800">{c.persona_key}</td>
-              <td className="px-3 py-2 text-slate-600">{c.task_id}</td>
-              <td className="px-3 py-2"><StatusBadge status={c.status} /></td>
-              <td className="px-3 py-2">{c.overall_score != null ? <Chip tone={scoreTone(c.overall_score)}>{c.overall_score}</Chip> : '—'}</td>
-              <td className="px-3 py-2">
-                <div className="flex flex-wrap gap-1">
-                  {Object.entries(c.dimension_scores || {}).map(([d, v]) => (
-                    <Chip key={d} tone={scoreTone(v.score)}>{DIMENSION_SHORT[d] || d} {v.score}</Chip>
-                  ))}
-                </div>
-              </td>
-              <td className="px-3 py-2 text-slate-400">{c.passed ? '✓' : c.status === 'done' ? '✗' : ''}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {openCase && <CaseDetail token={token} caseId={openCase} onClose={() => setOpenCase(null)} onViewTimeline={onViewTimeline} />}
+      {/* cases */}
+      <div className={`${CARD} p-5`}>
+        <div className="flex items-center gap-2">
+          <Caps>Cases</Caps>
+          <span className="text-xs text-slate-400">{cases.length} case{cases.length === 1 ? '' : 's'} · click a row to inspect</span>
+        </div>
+        <div className="mt-3">
+          {/* header */}
+          <div className="flex items-center gap-3 px-2 py-2 border-b border-[#E3E3E3]">
+            <div className="w-40 shrink-0"><Caps>Persona</Caps></div>
+            <div className="flex-1 min-w-0"><Caps>Task</Caps></div>
+            <div className="w-24 shrink-0"><Caps>Status</Caps></div>
+            <div className="w-16 shrink-0 text-right"><Caps>Overall</Caps></div>
+            <div className="w-6 shrink-0" />
+          </div>
+          {cases.map((c) => {
+            const open = openCase === c.id;
+            return (
+              <div key={c.id} className={`border-b border-[#EEE] ${open ? 'bg-[#F3F3FE] rounded-lg' : ''}`}>
+                <button
+                  onClick={() => setOpenCase(open ? null : c.id)}
+                  className="w-full flex items-center gap-3 px-2 py-3 text-left hover:bg-[#F7F7F9] rounded-lg"
+                >
+                  <div className="w-40 shrink-0 text-[13px] font-medium text-slate-800 truncate">{c.persona_key}</div>
+                  <div className="flex-1 min-w-0 text-[13px] text-slate-500 truncate">Task #{c.task_id}</div>
+                  <div className="w-24 shrink-0"><StatusBadge status={c.status} /></div>
+                  <div className="w-16 shrink-0 text-right">
+                    {c.overall_score != null ? <Chip tone={scoreTone(c.overall_score)}>{c.overall_score}</Chip> : <span className="text-slate-300">—</span>}
+                  </div>
+                  <div className="w-6 shrink-0 text-center text-slate-400">{open ? '▴' : '▾'}</div>
+                </button>
+                {open && <CaseDetail token={token} caseId={c.id} onViewTimeline={onViewTimeline} />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 };
@@ -310,19 +370,17 @@ const BatchCompare = ({ token, batchIds }) => {
     return () => { live = false; };
   }, [token, batchIds]);
 
-  // Must precede the loading branch: on failure a/b stay null, so checking
-  // !a || !b first would pin the pane on "Loading comparison…" forever.
   if (error) {
     return (
-      <div className="p-6">
-        <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded px-3 py-2">
+      <div className={`${CARD} p-4`}>
+        <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
           Couldn&apos;t load the comparison: {error}
         </div>
       </div>
     );
   }
 
-  if (!a || !b) return <div className="p-6 text-slate-400 text-sm">Loading comparison…</div>;
+  if (!a || !b) return <div className={`${CARD} p-6 text-slate-400 text-sm`}>Loading comparison…</div>;
 
   const aggA = a.batch.aggregate_scores || {};
   const aggB = b.batch.aggregate_scores || {};
@@ -334,18 +392,18 @@ const BatchCompare = ({ token, batchIds }) => {
     if (va == null || vb == null) return <td className="px-3 py-2 text-slate-400">—</td>;
     const d = vb - va;
     const tone = d > 0 ? 'text-emerald-600' : d < 0 ? 'text-rose-600' : 'text-slate-400';
-    return <td className={`px-3 py-2 font-medium ${tone}`}>{d > 0 ? '+' : ''}{d}{unit}</td>;
+    return <td className={`px-3 py-2 font-semibold ${tone}`}>{d > 0 ? '+' : ''}{d}{unit}</td>;
   };
   const passPct = (agg) => (agg.pass_rate != null ? Math.round(agg.pass_rate * 100) : null);
 
   return (
-    <div className="p-6">
-      <h2 className="text-lg font-bold text-[#1E1E1E] mb-1">Compare · #{a.batch.id} vs #{b.batch.id}</h2>
+    <div className={`${CARD} p-6`}>
+      <h2 className="text-xl font-bold text-[#1E1E1E] mb-1">Compare · #{a.batch.id} vs #{b.batch.id}</h2>
       <p className="text-xs text-slate-500 mb-4">
         A = #{a.batch.id} {a.batch.suite_key} ({fmtTime(a.batch.started_at)}) · B = #{b.batch.id} {b.batch.suite_key} ({fmtTime(b.batch.started_at)})
       </p>
 
-      <table className="w-full text-xs border border-[#E3E3E3] rounded-md overflow-hidden mb-4">
+      <table className="w-full text-xs border border-[#E3E3E3] rounded-lg overflow-hidden mb-4">
         <thead className="bg-[#F7F7F9] text-slate-600">
           <tr>
             <th className="text-left px-3 py-2 font-semibold">Metric</th>
@@ -455,6 +513,7 @@ const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
         judgeModel: judgeModel.trim() || undefined,
       });
       await loadBatches();
+      setCompareMode(false);
       setSelectedBatch(batchId);
     } catch (e) {
       setError(e.message || 'Failed to start eval');
@@ -464,7 +523,7 @@ const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
   };
 
   return (
-    <div className={`flex flex-col min-h-0 font-proxima ${embedded ? 'h-full' : 'h-screen bg-[#EFEFEF]'}`}>
+    <div className={`font-proxima bg-[#EFEFEF] flex flex-col min-h-0 ${embedded ? 'h-full' : 'h-screen'}`}>
       {!embedded && (
         <div className="shrink-0 bg-white border-b border-[#E3E3E3] px-8 py-4">
           <h1 className="text-2xl font-bold text-[#1E1E1E]">Coach Evals</h1>
@@ -472,102 +531,114 @@ const CoachEvals = ({ embedded = false, onViewTimeline = null }) => {
         </div>
       )}
 
-      {/* run bar */}
-      <div className="shrink-0 bg-white border-b border-[#E3E3E3] px-8 py-3 flex flex-wrap items-end gap-3">
-        <label className="text-xs text-slate-500">
-          <div className="mb-1">Suite</div>
-          <select value={suiteKey} onChange={(e) => setSuiteKey(e.target.value)} className="text-sm border border-[#E3E3E3] rounded-md px-2 py-1.5 min-w-48">
-            {suites.map((s) => <option key={s.key} value={s.key}>{s.key} — {s.description}</option>)}
-          </select>
-        </label>
-        <label className="text-xs text-slate-500">
-          <div className="mb-1">Coach model <span className="text-slate-400">(what the coach runs on)</span></div>
-          <select value={modelUnderTest} onChange={(e) => setModelUnderTest(e.target.value)} className="text-sm border border-[#E3E3E3] rounded-md px-2 py-1.5 w-56">
-            <option value="">Default (production coach model)</option>
-            {LLM_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-        </label>
-        <label className="text-xs text-slate-500">
-          <div className="mb-1">Judge model <span className="text-slate-400">(what scores the run)</span></div>
-          <select value={judgeModel} onChange={(e) => setJudgeModel(e.target.value)} className="text-sm border border-[#E3E3E3] rounded-md px-2 py-1.5 w-56">
-            <option value="">Default (independent judge)</option>
-            {LLM_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-        </label>
-        <button
-          onClick={handleRun}
-          disabled={running || !suiteKey}
-          className="text-sm font-medium text-white rounded-md px-4 py-2 disabled:opacity-50"
-          style={{ backgroundColor: BRAND }}
-        >
-          {running ? 'Starting…' : 'Run eval'}
-        </button>
-        <button
-          onClick={() => { setCompareMode((m) => !m); setCompareIds([]); }}
-          className={`text-sm font-medium rounded-md px-4 py-2 border ${compareMode ? 'text-white border-transparent' : 'text-slate-700 border-[#E3E3E3] bg-white'}`}
-          style={compareMode ? { backgroundColor: BRAND } : undefined}
-          title="Pick two batches to compare their scores side by side"
-        >
-          {compareMode ? 'Exit compare' : 'Compare batches'}
-        </button>
-        {error && <span className="text-xs text-rose-600">{error}</span>}
+      {/* run controls — pinned to the top; the two panes below scroll independently */}
+      <div className="shrink-0 px-8 pt-3 pb-4">
+        <div className={`${CARD} p-4`}>
+          <div className="flex flex-wrap items-end gap-4">
+            <SelectField label="Suite" value={suiteKey} onChange={(e) => setSuiteKey(e.target.value)} widthClass="w-64">
+              {suites.map((s) => <option key={s.key} value={s.key}>{s.key}</option>)}
+            </SelectField>
+            <SelectField label="Coach model" value={modelUnderTest} onChange={(e) => setModelUnderTest(e.target.value)} widthClass="w-56">
+              <option value="">Default (production coach)</option>
+              {LLM_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </SelectField>
+            <SelectField label="Judge model" value={judgeModel} onChange={(e) => setJudgeModel(e.target.value)} widthClass="w-56">
+              <option value="">Default (independent judge)</option>
+              {LLM_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </SelectField>
 
-        {/* Selected-suite metadata (focus + coverage) so the reviewer knows what
-            the run will exercise before starting it. */}
-        {selectedSuite && (
-          <div className="w-full text-[11px] text-slate-500 pt-1">
-            {selectedSuite.personaCount} persona{selectedSuite.personaCount === 1 ? '' : 's'} × {selectedSuite.taskCount} task{selectedSuite.taskCount === 1 ? '' : 's'}
-            {selectedSuite.focus && <span className="text-slate-400"> · {selectedSuite.focus}</span>}
+            <div className="w-full lg:w-auto lg:flex-1 min-w-[16px]" />
+
+            <button
+              onClick={handleRun}
+              disabled={running || !suiteKey}
+              className="text-sm font-semibold text-white rounded-lg px-5 py-2.5 disabled:opacity-50 transition"
+              style={{ backgroundColor: BRAND }}
+              onMouseEnter={(e) => { if (!running && suiteKey) e.currentTarget.style.backgroundColor = BRAND_HOVER; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = BRAND; }}
+            >
+              {running ? 'Starting…' : 'Run eval'}
+            </button>
+            <button
+              onClick={() => { setCompareMode((m) => !m); setCompareIds([]); }}
+              className={`text-sm font-semibold rounded-lg px-5 py-2.5 border transition ${compareMode ? 'text-white border-transparent' : 'text-slate-700 border-[#E3E3E3] bg-white hover:bg-[#F7F7F9]'}`}
+              style={compareMode ? { backgroundColor: BRAND } : undefined}
+              title="Pick two batches to compare their scores side by side"
+            >
+              {compareMode ? 'Exit compare' : 'Compare batches'}
+            </button>
           </div>
-        )}
-        {compareMode && (
-          <div className="w-full text-[11px] text-indigo-600 pt-0.5">
-            Compare mode — select two batches from the list ({compareIds.length}/2 selected).
-          </div>
-        )}
-      </div>
 
-      <div className="flex flex-1 min-h-0">
-        {/* batch list — scrolls independently */}
-        <aside className="w-80 shrink-0 border-r border-[#E3E3E3] bg-white overflow-y-auto min-h-0">
-          {batches.length === 0 && <div className="p-4 text-slate-400 text-sm">No eval batches yet.</div>}
-          {batches.map((b) => {
-            const active = compareMode ? compareIds.includes(b.id) : selectedBatch === b.id;
-            const agg = b.aggregate_scores || {};
-            return (
-              <button key={b.id} onClick={() => (compareMode ? toggleCompare(b.id) : setSelectedBatch(b.id))} className={`w-full text-left px-4 py-3 border-b border-[#F0F0F0] hover:bg-[#F7F7F9] ${active ? 'bg-[#F0F0FF]' : ''}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-slate-800">
-                    {compareMode && <span className="mr-1">{compareIds.includes(b.id) ? '☑' : '☐'}</span>}
-                    #{b.id} {b.suite_key}
-                  </span>
-                  <StatusBadge status={b.status} />
-                </div>
-                <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
-                  {agg.overall != null && <Chip tone={scoreTone(agg.overall)}>{agg.overall}</Chip>}
-                  <span>{b.completed_cases}/{b.total_cases}</span>
-                  <span className="ml-auto">{fmtTime(b.started_at)}</span>
-                </div>
-              </button>
-            );
-          })}
-        </aside>
-
-        <main className="flex-1 min-h-0 overflow-y-auto bg-[#EFEFEF]">
-          {compareMode ? (
-            compareIds.length === 2 ? (
-              <BatchCompare token={token} batchIds={compareIds} />
-            ) : (
-              <div className="h-full flex items-center justify-center text-slate-400 text-sm">Select two batches to compare.</div>
-            )
-          ) : selectedBatch ? (
-            <BatchDetail token={token} batchId={selectedBatch} onViewTimeline={onViewTimeline} />
-          ) : (
-            <div className="h-full flex items-center justify-center text-slate-400 text-sm">Run a suite or select a batch.</div>
+          {error && <p className="mt-3 text-xs text-rose-600">{error}</p>}
+          {selectedSuite && !compareMode && (
+            <p className="mt-3 text-[11px] text-slate-500">
+              {selectedSuite.personaCount} persona{selectedSuite.personaCount === 1 ? '' : 's'} × {selectedSuite.taskCount} task{selectedSuite.taskCount === 1 ? '' : 's'}
+              {selectedSuite.focus && <span className="text-slate-400"> · {selectedSuite.focus}</span>}
+            </p>
           )}
-        </main>
+          {compareMode && (
+            <p className="mt-3 text-[11px]" style={{ color: BRAND }}>
+              Compare mode — select two batches from the list ({compareIds.length}/2 selected).
+            </p>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* body: two independently-scrolling panes (batches left, results right) */}
+      <div className="flex-1 min-h-0 px-8 pb-6 flex gap-6">
+        <aside className="w-80 shrink-0 flex flex-col min-h-0">
+          <div className={`${CARD} p-4 flex flex-col min-h-0 flex-1`}>
+            <Caps className="mb-3 shrink-0">Batches</Caps>
+            <div className="space-y-2.5 overflow-y-auto pr-1 flex-1 min-h-0">
+                {batches.length === 0 && <div className="text-slate-400 text-sm py-2">No eval batches yet.</div>}
+                {batches.map((b) => {
+                  const active = compareMode ? compareIds.includes(b.id) : selectedBatch === b.id;
+                  const agg = b.aggregate_scores || {};
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => (compareMode ? toggleCompare(b.id) : setSelectedBatch(b.id))}
+                      className={`w-full text-left rounded-xl border p-3 transition ${active ? 'border-[#4242EA] bg-[#F3F3FE]' : 'border-[#E3E3E3] hover:bg-[#F7F7F9]'}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[13px] font-semibold text-slate-800 truncate">
+                          {compareMode && <span className="mr-1">{compareIds.includes(b.id) ? '☑' : '☐'}</span>}
+                          #{b.id} {b.suite_key}
+                        </span>
+                        <StatusBadge status={b.status} />
+                      </div>
+                      <div className="flex items-baseline gap-1.5 mt-1.5">
+                        <span className="text-[22px] font-bold leading-none" style={{ color: b.status === 'failed' ? '#94a3b8' : BRAND }}>
+                          {agg.overall ?? '—'}
+                        </span>
+                        <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">overall</span>
+                        {agg.pass_rate != null && (
+                          <span className="text-[10px] text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">pass {Math.round(agg.pass_rate * 100)}%</span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-1.5">{b.completed_cases}/{b.total_cases} cases · {fmtTime(b.started_at)}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+
+          <main className="flex-1 min-w-0 overflow-y-auto pr-1">
+            {compareMode ? (
+              compareIds.length === 2 ? (
+                <BatchCompare token={token} batchIds={compareIds} />
+              ) : (
+                <div className={`${CARD} p-10 text-center text-slate-400 text-sm`}>Select two batches to compare.</div>
+              )
+            ) : selectedBatch ? (
+              <BatchDetail token={token} batchId={selectedBatch} onViewTimeline={onViewTimeline} />
+            ) : (
+              <div className={`${CARD} p-10 text-center text-slate-400 text-sm`}>Run a suite or select a batch to see its results.</div>
+            )}
+          </main>
+        </div>
+      </div>
   );
 };
 

@@ -59,14 +59,31 @@ export default function CoachV2FlowDiagram() {
   useEffect(() => {
     let cancelled = false;
 
+    // Unique id per render so re-mounts don't collide. Declared out here so
+    // the catch below can clean up mermaid's scratch div by id.
+    const id = `coach-v2-flow-${Math.floor(performance.now())}`;
+
     async function render() {
       try {
         if (!mermaidInitialized) {
           mermaid.initialize({
             startOnLoad: false,
             theme: 'base',
-            fontFamily: '"Proxima Nova", "Helvetica Neue", Arial, sans-serif',
+            // Literal stack, not var(--font-family): mermaid also uses this
+            // value to measure label widths, so it must be a resolvable family
+            // list rather than a custom property. 'proxima-nova' (the Typekit
+            // family name) must stay first — see src/index.css.
+            fontFamily: 'proxima-nova, "Proxima Nova", "Helvetica Neue", Arial, sans-serif',
             securityLevel: 'strict',
+            // Mermaid renders into a scratch <div id="d{id}"> appended to
+            // document.body, then removes it. On a render failure it instead
+            // draws its 150px "Syntax error in text / mermaid version X" error
+            // graph into that scratch div and rethrows BEFORE the cleanup runs
+            // — so the giant text is orphaned in <body> (outside #root, above
+            // all page content) for the rest of the SPA session, on every tab.
+            // suppressErrorRendering makes the failure path clean up and just
+            // throw; our own `error` state renders the message instead.
+            suppressErrorRendering: true,
             flowchart: {
               htmlLabels: true,
               curve: 'basis',
@@ -88,13 +105,15 @@ export default function CoachV2FlowDiagram() {
           mermaidInitialized = true;
         }
 
-        // Unique id per render so re-mounts don't collide.
-        const id = `coach-v2-flow-${Math.floor(performance.now())}`;
         const { svg } = await mermaid.render(id, FLOW_SPEC);
         if (cancelled) return;
         setSvgMarkup(svg);
       } catch (err) {
         console.error('Mermaid render failed:', err);
+        // Belt-and-suspenders on suppressErrorRendering: if mermaid ever throws
+        // on a path that skips its own cleanup, drop the orphaned scratch div
+        // ourselves so it can't sit in <body> over the page content.
+        document.getElementById(`d${id}`)?.remove();
         if (!cancelled) setError(err.message);
       }
     }

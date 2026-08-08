@@ -3,6 +3,12 @@ import { FaPaperPlane, FaRobot, FaUser, FaInfoCircle, FaArrowLeft } from 'react-
 import ReactMarkdown from 'react-markdown';
 import useAuthStore from '../../../../stores/authStore';
 import './AssessmentLLMChat.css';
+import { createCodeRenderers } from '../../../markdown/codeRenderers';
+
+const codeRenderers = createCodeRenderers({
+  inlineClassName: 'inline-code',
+  preClassName: 'assessment-code-block',
+});
 
 function AssessmentLLMChat({ 
   assessmentId, 
@@ -228,29 +234,8 @@ function AssessmentLLMChat({
           key={index}
           components={{
             // Override code handling to ensure no ReactMarkdown code blocks interfere
-            code: ({node, inline, className, children, ...props}) => {
-              if (inline) {
-                return (
-                  <code className="inline-code" {...props}>
-                    {children}
-                  </code>
-                );
-              }
-              // For block code that ReactMarkdown tries to render, force our styling
-              return (
-                <pre className="assessment-code-block" {...props}>
-                  <code>{children}</code>
-                </pre>
-              );
-            },
-            pre: ({node, children, ...props}) => {
-              // Override pre elements to use our styling
-              return (
-                <pre className="assessment-code-block" {...props}>
-                  {children}
-                </pre>
-              );
-            },
+            code: codeRenderers.code,
+            pre: codeRenderers.pre,
             p: ({node, children, ...props}) => (
               <p className="markdown-paragraph" {...props}>{children}</p>
             ),

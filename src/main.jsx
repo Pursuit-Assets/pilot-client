@@ -6,6 +6,7 @@ import App from './App.jsx'
 import Login from './pages/Login/Login.jsx'
 import Signup from './pages/Signup/Signup.jsx'
 import EnterpriseSignup from './pages/EnterpriseSignup/EnterpriseSignup.jsx'
+import CandidateSignup from './pages/CandidateSignup/CandidateSignup.jsx'
 import ForgotPassword from './pages/Login/ForgotPassword.jsx'
 import ResetPassword from './pages/Login/ResetPassword.jsx'
 import VerifyEmail from './pages/Login/VerifyEmail.jsx'
@@ -81,6 +82,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/enterprise/signup" element={<EnterpriseSignup />} />
+            {/* Interview-candidate signup — reachable ONLY via the emailed invite link.
+                Intentionally not linked from /signup or anywhere else in the product. */}
+            <Route path="/candidate/signup" element={<CandidateSignup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password/:token" element={<ResetPassword />} />
             <Route path="/verify-email/:token" element={<VerifyEmail />} />

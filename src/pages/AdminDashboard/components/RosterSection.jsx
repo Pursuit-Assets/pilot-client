@@ -9,6 +9,7 @@ import BuilderDrawer from './BuilderDrawer';
 import BuilderLogModal from './BuilderLogModal';
 import AttendanceManagement from '../../../components/AttendanceManagement/AttendanceManagement';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 import {
   GradeBar, SortHeader, ENROLLMENT_BADGE, ENROLLMENT_LABELS,
 } from '../utils/sharedComponents';
@@ -21,6 +22,9 @@ const verifyKey = (cohortId) => `enrollment_verified_${cohortId}`;
 
 const RosterSection = ({ selectedCohortId, cohorts }) => {
   const token = useAuthStore((s) => s.token);
+  // Read-only accounts (interview candidates) see the roster and its statuses, but every
+  // control that would change one is withheld — the server refuses those writes.
+  const { isReadOnly } = usePermissions();
   const endDate = new Date().toISOString().split('T')[0];
   // Use cohort start_date if available, otherwise fall back to a generous default
   const cohortObj = cohorts.find(c => c.cohort_id === selectedCohortId);
@@ -220,12 +224,14 @@ const RosterSection = ({ selectedCohortId, cohorts }) => {
                 : `Enrollment not verified — last verified ${daysSinceVerified} day${daysSinceVerified !== 1 ? 's' : ''} ago.`}
             </p>
           </div>
-          <button
-            onClick={() => setVerifyDrawerOpen(true)}
-            className="flex-shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors"
-          >
-            Verify Enrollment
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={() => setVerifyDrawerOpen(true)}
+              className="flex-shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors"
+            >
+              Verify Enrollment
+            </button>
+          )}
         </div>
       ) : (
         <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2">
@@ -329,6 +335,10 @@ const RosterSection = ({ selectedCohortId, cohorts }) => {
                           <div className="flex items-center gap-1.5">
                             {savingEnrollmentId === b.user_id ? (
                               <span className="text-[10px] text-slate-400">Saving...</span>
+                            ) : isReadOnly ? (
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ENROLLMENT_BADGE[b.enrollment_status || 'in_progress']}`}>
+                                {ENROLLMENT_LABELS[b.enrollment_status || 'in_progress']}
+                              </span>
                             ) : (
                               <select
                                 value={b.enrollment_status || 'in_progress'}
@@ -348,7 +358,8 @@ const RosterSection = ({ selectedCohortId, cohorts }) => {
                                   type="date"
                                   value={b.withdrawal_date ? (typeof b.withdrawal_date === 'string' ? b.withdrawal_date.split('T')[0] : new Date(b.withdrawal_date).toISOString().split('T')[0]) : ''}
                                   onChange={(e) => handleWithdrawalDateSave(b, e.target.value)}
-                                  className="text-[9px] text-red-500 bg-white border border-red-200 rounded px-1 py-0.5 focus:outline-none focus:border-red-400 w-28 cursor-pointer"
+                                  readOnly={isReadOnly}
+                                  className={`text-[9px] text-red-500 bg-white border border-red-200 rounded px-1 py-0.5 focus:outline-none focus:border-red-400 w-28 ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}
                                   title="Withdrawal date"
                                 />
                               </div>
@@ -356,21 +367,27 @@ const RosterSection = ({ selectedCohortId, cohorts }) => {
                           </div>
                         </td>
                         <td className="py-2 px-2">
+                          {/* Both actions open write-only surfaces (attendance editing, new
+                              builder log), so they're withheld from read-only accounts. */}
                           <div className="flex items-center gap-1 justify-center">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setAttendanceBuilder(b); }}
-                              className="p-1 rounded text-slate-400 hover:text-[#4242EA] hover:bg-[#EFEFEF] transition-colors"
-                              title="Manage attendance"
-                            >
-                              <CalendarDays size={13} />
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setLogModalBuilder(b); }}
-                              className="p-1 rounded text-slate-400 hover:text-[#4242EA] hover:bg-[#EFEFEF] transition-colors"
-                              title="Add log"
-                            >
-                              <FileText size={13} />
-                            </button>
+                            {!isReadOnly && (
+                              <>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setAttendanceBuilder(b); }}
+                                  className="p-1 rounded text-slate-400 hover:text-[#4242EA] hover:bg-[#EFEFEF] transition-colors"
+                                  title="Manage attendance"
+                                >
+                                  <CalendarDays size={13} />
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setLogModalBuilder(b); }}
+                                  className="p-1 rounded text-slate-400 hover:text-[#4242EA] hover:bg-[#EFEFEF] transition-colors"
+                                  title="Add log"
+                                >
+                                  <FileText size={13} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>

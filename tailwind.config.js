@@ -55,7 +55,9 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: ['Proxima Nova', '-apple-system', 'BlinkMacSystemFont', 'Helvetica Neue', 'Segoe UI', 'sans-serif'],
+        // 'proxima-nova' is the Adobe Fonts (Typekit) family name and MUST stay
+        // first — 'Proxima Nova' does not match the kit. See src/index.css.
+        sans: ['proxima-nova', 'Proxima Nova', '-apple-system', 'BlinkMacSystemFont', 'Helvetica Neue', 'Segoe UI', 'sans-serif'],
       },
       spacing: {
         'navbar-collapsed': '50px',

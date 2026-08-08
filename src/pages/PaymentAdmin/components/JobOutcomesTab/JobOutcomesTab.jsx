@@ -8,68 +8,57 @@ import AlumniList from './AlumniList';
 import EmployersTable from './EmployersTable';
 import AlumniDetailModal from './AlumniDetailModal';
 import SalaryAnalysis from './SalaryAnalysis';
-import BondStatus from './BondStatus';
-import {
-  mockOverview,
-  mockCohorts,
-  mockAlumni,
-  mockEmployers,
-  mockSyncStatus,
-} from './mockData';
 
 const API = import.meta.env.VITE_API_URL;
+
+const EMPTY_ALUMNI = { data: [], total: 0, limit: 500, offset: 0 };
 
 const JobOutcomesTab = () => {
   const token = useAuthStore((s) => s.token);
 
   const [cohort, setCohort] = useState('all');
-  const [cohorts, setCohorts] = useState(mockCohorts);
-  const [overview, setOverview] = useState(mockOverview);
-  const [alumni, setAlumni] = useState(mockAlumni);
-  const [employers, setEmployers] = useState(mockEmployers);
-  const [syncStatus, setSyncStatus] = useState(mockSyncStatus);
+  const [cohorts, setCohorts] = useState([]);
+  const [overview, setOverview] = useState(null);
+  const [alumni, setAlumni] = useState(EMPTY_ALUMNI);
+  const [employers, setEmployers] = useState([]);
+  const [syncStatus, setSyncStatus] = useState(null);
   const [selectedContactId, setSelectedContactId] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [usingSheet, setUsingSheet] = useState(true);
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
   const fetchAll = useCallback(async (cohortValue) => {
-    // Try the API; if it returns 0 alumni (DB empty until SF sync), keep the sheet data.
+    // Everything on this page comes from the API. There is deliberately no bundled
+    // fallback: this data is alumni salaries and bond invoice amounts, and the version
+    // that used to ship as a JS fixture put all of it in the browser bundle and in every
+    // clone of the repo. An outage here shows an error, not a stale copy of real records.
     setIsLoading(true);
+    setError('');
     const cohortParam = cohortValue && cohortValue !== 'all' ? `?cohort=${encodeURIComponent(cohortValue)}` : '';
 
     try {
-      const overviewRes = await fetch(`${API}/api/job-outcomes/overview${cohortParam}`, { headers: authHeaders });
-      if (!overviewRes.ok) throw new Error(`overview: HTTP ${overviewRes.status}`);
-      const apiOverview = await overviewRes.json();
-
-      if (!apiOverview.totalAlumni) {
-        // DB is empty — keep the sheet-based fallback already in state.
-        setUsingSheet(true);
-        return;
-      }
-
-      // Real data exists — pull everything from API.
-      setUsingSheet(false);
-      const [alumniRes, employersRes, cohortsRes, syncRes] = await Promise.all([
+      const [overviewRes, alumniRes, employersRes, cohortsRes, syncRes] = await Promise.all([
+        fetch(`${API}/api/job-outcomes/overview${cohortParam}`, { headers: authHeaders }),
         fetch(`${API}/api/job-outcomes/alumni${cohortParam}${cohortParam ? '&' : '?'}limit=500`, { headers: authHeaders }),
         fetch(`${API}/api/job-outcomes/employers${cohortParam}`, { headers: authHeaders }),
         fetch(`${API}/api/job-outcomes/cohorts`, { headers: authHeaders }),
         fetch(`${API}/api/job-outcomes/sync/status`, { headers: authHeaders }),
       ]);
-      setOverview(apiOverview);
+
+      const failed = [overviewRes, alumniRes, employersRes, cohortsRes, syncRes].find((r) => !r.ok);
+      if (failed) throw new Error(`HTTP ${failed.status}`);
+
+      setOverview(await overviewRes.json());
       setAlumni(await alumniRes.json());
       setEmployers(await employersRes.json());
       setCohorts(await cohortsRes.json());
       setSyncStatus(await syncRes.json());
     } catch (e) {
-      // Network/auth error — silently fall back to the sheet data
-      console.warn('Job outcomes API unavailable; using sheet fallback:', e.message);
-      setUsingSheet(true);
+      console.error('Job outcomes fetch failed:', e);
+      setError(e.message || 'Failed to load job outcomes');
     } finally {
       setIsLoading(false);
     }
@@ -107,9 +96,7 @@ const JobOutcomesTab = () => {
         <div>
           <h2 className="text-xl font-bold text-gray-900">Job Outcomes</h2>
           <p className="text-sm text-gray-500 mt-1">
-            {usingSheet
-              ? 'Loaded from Bond Job Changes + Salary Analysis sheets (Salesforce sync coming soon)'
-              : 'Alumni employment data synced from Salesforce'}
+            Alumni employment and bond invoicing data
           </p>
         </div>
         <Select value={cohort} onValueChange={setCohort}>
@@ -144,38 +131,45 @@ const JobOutcomesTab = () => {
         </div>
       )}
 
-      <Tabs defaultValue="kpis" className="w-full">
-        <TabsList className="grid w-full grid-cols-5 max-w-3xl">
-          <TabsTrigger value="kpis">Overview</TabsTrigger>
-          <TabsTrigger value="alumni">Alumni</TabsTrigger>
-          <TabsTrigger value="employers">Employers</TabsTrigger>
-          <TabsTrigger value="salary">Salary Analysis</TabsTrigger>
-          <TabsTrigger value="bond">Payment Status</TabsTrigger>
-        </TabsList>
+      {isLoading && (
+        <div className="py-12 text-center text-gray-500 text-sm">Loading job outcomes…</div>
+      )}
 
-        <TabsContent value="kpis" className="mt-6">
-          <CohortKpis overview={overview} />
-        </TabsContent>
+      {!isLoading && !error && !overview?.totalAlumni && (
+        <div className="py-12 text-center text-gray-500 text-sm">
+          No alumni outcomes recorded yet.
+        </div>
+      )}
 
-        <TabsContent value="alumni" className="mt-6">
-          <AlumniList
-            alumni={alumni}
-            onSelect={(a) => setSelectedContactId(a.salesforce_contact_id)}
-          />
-        </TabsContent>
+      {!isLoading && !error && !!overview?.totalAlumni && (
+        <Tabs defaultValue="kpis" className="w-full">
+          <TabsList className="grid w-full grid-cols-4 max-w-3xl">
+            <TabsTrigger value="kpis">Overview</TabsTrigger>
+            <TabsTrigger value="alumni">Alumni</TabsTrigger>
+            <TabsTrigger value="employers">Employers</TabsTrigger>
+            <TabsTrigger value="salary">Salary Analysis</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="employers" className="mt-6">
-          <EmployersTable employers={employers} />
-        </TabsContent>
+          <TabsContent value="kpis" className="mt-6">
+            <CohortKpis overview={overview} />
+          </TabsContent>
 
-        <TabsContent value="salary" className="mt-6">
-          <SalaryAnalysis />
-        </TabsContent>
+          <TabsContent value="alumni" className="mt-6">
+            <AlumniList
+              alumni={alumni}
+              onSelect={(a) => setSelectedContactId(a.salesforce_contact_id)}
+            />
+          </TabsContent>
 
-        <TabsContent value="bond" className="mt-6">
-          <BondStatus />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="employers" className="mt-6">
+            <EmployersTable employers={employers} />
+          </TabsContent>
+
+          <TabsContent value="salary" className="mt-6">
+            <SalaryAnalysis cohort={cohort} />
+          </TabsContent>
+        </Tabs>
+      )}
 
       <AlumniDetailModal
         contactId={selectedContactId}

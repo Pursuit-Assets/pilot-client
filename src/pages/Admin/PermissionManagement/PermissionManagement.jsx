@@ -38,7 +38,9 @@ import {
   DialogTitle,
 } from '../../../components/ui/dialog';
 import { Textarea } from '../../../components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { toast } from 'sonner';
+import CandidateInvites from './components/CandidateInvites';
 
 // Format role name for display (e.g. "workshop_admin" -> "Workshop Admin")
 const formatRoleName = (role) => {
@@ -46,7 +48,7 @@ const formatRoleName = (role) => {
 };
 
 // Fallback role list (used until DB roles are loaded)
-const FALLBACK_ROLES = ['admin', 'staff', 'builder', 'volunteer', 'workshop_participant', 'workshop_admin', 'enterprise_builder', 'enterprise_admin', 'applicant'];
+const FALLBACK_ROLES = ['admin', 'staff', 'builder', 'volunteer', 'workshop_participant', 'workshop_admin', 'enterprise_builder', 'enterprise_admin', 'candidate', 'applicant'];
 
 // Admin page permissions that can be toggled for staff users
 const ADMIN_PAGE_PERMISSIONS = [
@@ -218,6 +220,8 @@ function PermissionManagement() {
   // Filters and sorting
   const [roleFilter, setRoleFilter] = useState('');
   const [sortDirection, setSortDirection] = useState('name_asc');
+  // Two surfaces live on this page now: per-user permissions and candidate invites.
+  const [activeTab, setActiveTab] = useState('users');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 25;
@@ -1165,6 +1169,23 @@ function PermissionManagement() {
         </div>
 
         <div className="max-w-7xl mx-auto px-8 py-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="bg-white border border-slate-200 p-1 mb-6 rounded-lg inline-flex">
+              <TabsTrigger
+                value="users"
+                className="data-[state=active]:bg-[#4242EA] data-[state=active]:text-white text-slate-700 font-medium font-proxima px-6 py-2.5 rounded-md transition-all"
+              >
+                User Permissions
+              </TabsTrigger>
+              <TabsTrigger
+                value="candidates"
+                className="data-[state=active]:bg-[#4242EA] data-[state=active]:text-white text-slate-700 font-medium font-proxima px-6 py-2.5 rounded-md transition-all"
+              >
+                Candidate Invites
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="users" className="mt-0">
           {/* Search bar */}
           <div className="bg-white rounded-lg border border-slate-200 mb-4">
             <div className="p-4 flex items-center gap-4">
@@ -1296,6 +1317,12 @@ function PermissionManagement() {
               />
             )}
           </div>
+            </TabsContent>
+
+            <TabsContent value="candidates" className="mt-0">
+              <CandidateInvites />
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
 

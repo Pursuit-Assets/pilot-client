@@ -35,7 +35,7 @@
 }
 
 .loading-curtain__text {
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-family);
   font-weight: 700;
   font-size: 16px;
   line-height: 18px;
@@ -44,7 +44,7 @@
 }
 
 .loading-curtain__percentage {
-  font-family: 'Proxima Nova', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-family);
   font-weight: 700;
   font-size: 14px;
   color: #FFFFFF;

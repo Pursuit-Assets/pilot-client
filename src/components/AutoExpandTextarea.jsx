@@ -66,6 +66,11 @@ const AutoExpandTextarea = forwardRef(({
     dictationBaseRef.current = prefix + sep;
 
     recognition.onresult = (event) => {
+      // Stale-session guard: stop()/abort() can still deliver an already-
+      // queued (or flushed) onresult AFTER clearAfterSubmit ran — without
+      // this check that late event resurrects the just-sent message into
+      // the cleared textarea (voice-send bug, 2026-08-06).
+      if (recognitionRef.current !== recognition) return;
       // Rebuild the dictation tail from scratch each event — the
       // SpeechRecognition spec says results[].isFinal can transition from
       // false to true between events, so we can't just append. Walking all
@@ -221,8 +226,17 @@ const AutoExpandTextarea = forwardRef(({
   // guards the same way.
   const clearAfterSubmit = () => {
     if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch { /* not started */ }
+      // Disarm BEFORE abort: stop()/abort() can still deliver an already-
+      // queued onresult after this function returns (Chrome flushes a final
+      // result asynchronously on stop). Nulling the handlers + the ref (the
+      // onresult stale-session guard checks the ref) makes a late event a
+      // no-op instead of resurrecting the just-sent message.
+      const recognition = recognitionRef.current;
+      recognition.onresult = null;
+      recognition.onend = null;
+      recognition.onerror = null;
       recognitionRef.current = null;
+      try { recognition.abort(); } catch { /* not started */ }
       setIsListening(false);
     }
     dictationBaseRef.current = '';

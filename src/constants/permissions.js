@@ -60,6 +60,16 @@ export const PAGE_PERMISSIONS = {
   PLATFORM_INTAKE: 'page:platform_intake',
 };
 
+/**
+ * Roles that may only READ. The server refuses every state-changing request from these
+ * (test-pilot-server `middleware/readOnlyRole.js`); the client uses this list — via
+ * `usePermissions().isReadOnly` — to hide write controls so a read-only user is never
+ * offered a button that will 403.
+ *
+ * Keep in sync with READ_ONLY_ROLES in test-pilot-server middleware/readOnlyRole.js.
+ */
+export const READ_ONLY_ROLES = ['candidate'];
+
 // Feature-level permission keys (for future use)
 export const FEATURE_PERMISSIONS = {
   EDIT_CURRICULUM: 'feature:edit_curriculum',
@@ -202,16 +212,17 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     PAGE_PERMISSIONS.PLATFORM_INTAKE,
   ],
 
+  // Interview candidates (AI-Native Instructor practical exercise). Read-only by
+  // enforcement, not by permission: every Cohort Hub route is gated on the single key
+  // page:admin_attendance, which covers reads AND writes, so the server refuses any
+  // state-changing request from this role (test-pilot-server middleware/readOnlyRole.js).
+  // Kept narrow on purpose — a candidate has no enrollment, so builder pages would be
+  // empty, and nothing outside the Cohort Hub is part of the exercise.
+  // Must stay in sync with role_permissions (server migration 20260803_candidate_invites.sql).
   candidate: [
-    // Builder-style experience + selected staff tools
-    PAGE_PERMISSIONS.DASHBOARD,
-    PAGE_PERMISSIONS.LEARNING,
-    PAGE_PERMISSIONS.AI_CHAT,
-    PAGE_PERMISSIONS.CALENDAR,
-    PAGE_PERMISSIONS.ADMIN_ATTENDANCE,
-    PAGE_PERMISSIONS.ASSESSMENT_GRADES,
-    PAGE_PERMISSIONS.ADMIN_DASHBOARD,
-    PAGE_PERMISSIONS.PLATFORM_INTAKE,
+    PAGE_PERMISSIONS.ADMIN_DASHBOARD,   // the Cohort Hub page + nav entry
+    PAGE_PERMISSIONS.ADMIN_ATTENDANCE,  // gates every Cohort Hub data endpoint
+    PAGE_PERMISSIONS.ASSESSMENT_GRADES, // gates the Assessments tab's grade data
   ],
   
   applicant: [

@@ -29,6 +29,8 @@ import {
 } from '../../../../components/ui/dialog';
 import { formatPhoneNumber, getStatusBadgeClasses, formatStatus, getColumnLabel } from '../shared/utils';
 import { Input } from '../../../../components/ui/input';
+import Swal from 'sweetalert2';
+import { toast } from 'sonner';
 
 // Filter options for each column
 const filterOptions = {
@@ -762,8 +764,39 @@ const ApplicationsTab = ({
   }, [cohorts]);
 
   const handleMoveSelectedToCohort = useCallback(async () => {
-    if (selectedApplicants.length === 0 || !targetCohortId) return;
+    if (selectedApplicants.length === 0 || !targetCohortId || movingCohort) return;
+
+    // Claimed BEFORE the dialog opens, not after it resolves. The Move button is only disabled on
+    // this flag, so setting it afterwards left the button live for as long as the prompt was up —
+    // a double-click stacked a second dialog on the same selection and fired the move twice.
     setMovingCohort(true);
+
+    // A bulk move is how 13 already-decided applicants landed in the actively-recruiting cohort
+    // on 2026-07-07 with nothing recorded about who or why. Every move is now audited, and the
+    // server refuses to move an applicant whose admission decision is final without a reason.
+    let reason;
+    try {
+      const result = await Swal.fire({
+        title: `Move ${selectedApplicants.length} applicant${selectedApplicants.length === 1 ? '' : 's'} to ${cohortNameMap[targetCohortId] || 'this cohort'}?`,
+        input: 'text',
+        inputLabel: 'Reason for the move (recorded in the audit trail)',
+        inputPlaceholder: 'e.g. applied to the wrong cycle by mistake',
+        showCancelButton: true,
+        confirmButtonText: 'Move applicants'
+      });
+      if (!result.isConfirmed) {
+        setMovingCohort(false);
+        return;
+      }
+      reason = result.value;
+    } catch (error) {
+      // A dialog that never resolves normally (dismissed programmatically) must not strand the
+      // button disabled forever.
+      console.error('Cohort move prompt failed:', error);
+      setMovingCohort(false);
+      return;
+    }
+
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/admissions/bulk-actions`, {
         method: 'POST',
@@ -774,7 +807,8 @@ const ApplicationsTab = ({
         body: JSON.stringify({
           action: 'move_to_cohort',
           applicant_ids: selectedApplicants,
-          cohort_id: targetCohortId
+          cohort_id: targetCohortId,
+          notes: (reason || '').trim() || null
         })
       });
 
@@ -783,16 +817,60 @@ const ApplicationsTab = ({
         throw new Error(data.error || 'Failed to move selected applicants');
       }
 
+      // The endpoint answers 200 even when individual applicants were refused (deferred, or a
+      // final decision with no reason). Those per-row results used to be dropped on the floor,
+      // so a partly-refused bulk move looked like a clean success.
+      const data = await response.json().catch(() => ({}));
+      const updates = data?.results?.cohort_updates || [];
+      const failed = updates.filter((u) => !u.success);
+      const moved = updates.length - failed.length;
+
       await fetchApplications();
       setSelectedApplicants([]);
       setTargetCohortId('');
+
+      if (failed.length === 0) {
+        toast.success(`Moved ${moved} applicant${moved === 1 ? '' : 's'}`, {
+          description: `Now in ${cohortNameMap[targetCohortId] || 'the selected cohort'}.`
+        });
+      } else {
+        // Grouped by reason rather than listed per applicant. Every refusal in a bulk move has one
+        // of two causes, and both are acted on in bulk too ("reinstate these", "give a reason"), so
+        // 20 identical lines are worse than one count per cause. Longer duration because a skipped
+        // applicant is follow-up work, not an FYI.
+        const byReason = failed.reduce((acc, f) => {
+          const reason = f.error || 'Unknown reason';
+          acc[reason] = (acc[reason] || 0) + 1;
+          return acc;
+        }, {});
+        // JSX, not a \n-joined string — sonner renders the description as HTML, where a newline
+        // collapses to a space and every reason would run together on one line.
+        const description = (
+          <span className="flex flex-col gap-1">
+            {Object.entries(byReason).map(([reason, n]) => (
+              <span key={reason}>{n} × {reason}</span>
+            ))}
+          </span>
+        );
+
+        const notify = moved > 0 ? toast.warning : toast.error;
+        notify(
+          moved > 0
+            ? `Moved ${moved}, skipped ${failed.length}`
+            : 'No applicants were moved',
+          { description, duration: 12000 }
+        );
+      }
     } catch (error) {
       console.error('Error moving selected applicants to cohort:', error);
-      alert(error.message || 'Failed to move selected applicants');
+      toast.error('Bulk move failed', {
+        description: error.message || 'Failed to move selected applicants',
+        duration: 8000
+      });
     } finally {
       setMovingCohort(false);
     }
-  }, [selectedApplicants, targetCohortId, token, fetchApplications, setSelectedApplicants]);
+  }, [selectedApplicants, targetCohortId, movingCohort, token, fetchApplications, setSelectedApplicants, cohortNameMap]);
   
   // Handle navigating to applicant detail
   const handleViewApplication = useCallback((applicantId) => {

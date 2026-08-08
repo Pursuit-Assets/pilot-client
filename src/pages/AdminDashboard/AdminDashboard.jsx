@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import useAuthStore from '../../stores/authStore';
 import useNavStore from '../../stores/navStore';
 import { usePermissions } from '../../hooks/usePermissions';
+import { pickDefaultCohortId } from './utils/cohortUtils';
 import OverviewTab from './tabs/OverviewTab';
 import TodayTab from './tabs/TodayTab';
 import AssessmentsTab from './tabs/AssessmentsTab';
@@ -11,7 +12,6 @@ import LogsTab from './tabs/LogsTab';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:7001';
 const STORAGE_KEY = 'pursuit_program_slug';
 const COHORT_STORAGE_KEY = 'pursuit_selected_cohort';
-const DEFAULT_COHORT_NAME = 'March 2026 L1';
 
 const TABS = [
   { id: 'today',       label: 'Today' },
@@ -29,6 +29,9 @@ const AdminDashboard = () => {
   const user = useAuthStore((s) => s.user);
   const token = useAuthStore((s) => s.token);
   const { canAccessPage } = usePermissions();
+  // Interview candidates get this page read-only — enforced server-side by
+  // middleware/readOnlyRole.js, surfaced here so it doesn't read as a broken page.
+  const isReadOnly = user?.role === 'candidate';
   const [activeTab, setActiveTab] = useState('today');
 
   const [programs, setPrograms] = useState([]);
@@ -60,9 +63,8 @@ const AdminDashboard = () => {
         if (persisted && list.some(c => c.cohort_id === persisted)) {
           setSelectedCohortId(persisted);
         } else if (list.length > 0) {
-          // Default to March 2026 L1 if it exists, otherwise first cohort
-          const defaultCohort = list.find(c => c.name === DEFAULT_COHORT_NAME);
-          const id = defaultCohort ? defaultCohort.cohort_id : list[0].cohort_id;
+          // Newest L1 that actually has builders in it — see pickDefaultCohortId.
+          const id = pickDefaultCohortId(list);
           setSelectedCohortId(id);
           localStorage.setItem(COHORT_STORAGE_KEY, id);
         } else {
@@ -122,10 +124,22 @@ const AdminDashboard = () => {
       <div className="bg-white border-b border-[#E3E3E3] px-8 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
-              Cohort Hub
-            </h1>
-            <p className="text-slate-500 text-sm mt-0.5">Per-cohort facilitator workspace</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'var(--font-family)' }}>
+                Cohort Hub
+              </h1>
+              {/* Interview candidates read this dashboard for their exercise. The server
+                  refuses every write from the role, so say so up front rather than letting
+                  them discover it by clicking. */}
+              {isReadOnly && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium">
+                  Read-only
+                </span>
+              )}
+            </div>
+            <p className="text-slate-500 text-sm mt-0.5">
+              {isReadOnly ? 'Viewing cohort data — this account cannot make changes' : 'Per-cohort facilitator workspace'}
+            </p>
           </div>
           <div className="flex items-center gap-4 flex-shrink-0">
             {programs.length > 1 && (

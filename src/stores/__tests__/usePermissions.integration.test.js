@@ -551,22 +551,51 @@ describe('usePermissions integration with authStore', () => {
   });
 
   describe('candidate role (no DB permissions)', () => {
-    it('has builder pages plus select staff tools', () => {
+    // Interview candidates (AI-Native Instructor exercise) are scoped to the Cohort Hub
+    // and Program Analytics. The two extra keys exist only because the Cohort Hub's data
+    // endpoints are gated on them. Narrowed 2026-08-03 — they used to carry the
+    // builder-facing pages too, which render empty for an account with no enrollment.
+    it('is scoped to the Cohort Hub and the data it needs', () => {
       useAuthStore.setState({
-        user: { userId: 14, role: 'candidate', userType: 'builder' },
+        user: { userId: 14, role: 'candidate', userType: 'candidate' },
         isAuthenticated: true,
       });
 
       const { result } = renderHook(() => usePermissions());
 
-      expect(result.current.hasPermission('page:dashboard')).toBe(true);
-      expect(result.current.hasPermission('page:learning')).toBe(true);
+      expect(result.current.hasPermission('page:admin_dashboard')).toBe(true);
       expect(result.current.hasPermission('page:admin_attendance')).toBe(true);
       expect(result.current.hasPermission('page:assessment_grades')).toBe(true);
-      expect(result.current.hasPermission('page:admin_dashboard')).toBe(true);
-      // But NOT full admin
+
+      // No builder-facing pages — a candidate has no enrollment behind them
+      expect(result.current.hasPermission('page:dashboard')).toBe(false);
+      expect(result.current.hasPermission('page:learning')).toBe(false);
+
+      // And nothing admin
       expect(result.current.hasPermission('page:admin_prompts')).toBe(false);
       expect(result.current.isAdmin).toBe(false);
+    });
+
+    it('is read-only, so write controls are withheld', () => {
+      useAuthStore.setState({
+        user: { userId: 14, role: 'candidate', userType: 'candidate' },
+        isAuthenticated: true,
+      });
+
+      const { result } = renderHook(() => usePermissions());
+
+      expect(result.current.isReadOnly).toBe(true);
+    });
+
+    it.each(['staff', 'admin', 'builder', 'volunteer'])('does not mark %s read-only', (role) => {
+      useAuthStore.setState({
+        user: { userId: 15, role, userType: 'builder' },
+        isAuthenticated: true,
+      });
+
+      const { result } = renderHook(() => usePermissions());
+
+      expect(result.current.isReadOnly).toBe(false);
     });
   });
 

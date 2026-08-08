@@ -44,7 +44,7 @@ const ProgramAnalytics = () => {
       <div className="bg-white border-b border-[#E3E3E3] px-8 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+            <h1 className="text-xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'var(--font-family)' }}>
               Program Analytics
             </h1>
             <p className="text-slate-500 text-sm mt-0.5">Cross-cohort health and pipeline metrics</p>

@@ -48,7 +48,7 @@ const PlatformAnalytics = () => {
       {!isSecondaryNavPage && (
         <div className="bg-white border-b border-[#E3E3E3] px-8 py-4">
           <div className="max-w-7xl mx-auto">
-            <h1 className="text-2xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+            <h1 className="text-2xl font-bold text-[#1E1E1E]" style={{ fontFamily: 'var(--font-family)' }}>
               Platform Analytics
             </h1>
             <p className="text-slate-500 text-sm mt-0.5">

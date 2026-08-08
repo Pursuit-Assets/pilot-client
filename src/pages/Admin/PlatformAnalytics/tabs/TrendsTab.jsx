@@ -156,7 +156,7 @@ const UserDrilldownDialog = ({ token, userId, userName, startDate, endDate, onCl
                 {(userName || '?').charAt(0).toUpperCase()}
               </div>
               <div>
-                <p className="text-lg font-bold text-[#1E1E1E]" style={{ fontFamily: 'Proxima Nova, sans-serif' }}>
+                <p className="text-lg font-bold text-[#1E1E1E]" style={{ fontFamily: 'var(--font-family)' }}>
                   {userName || `User #${userId}`}
                 </p>
                 {dateRange && (

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
 import { Badge } from '../../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
@@ -49,6 +50,9 @@ const fmt = (d) => {
 };
 
 const ProgramMetricsTab = ({ programSlug = 'ai-native-builder' }) => {
+  // Read-only accounts (interview candidates) can read the funnel and drill into it, but
+  // the inline admission/enrollment status editors are withheld — the server refuses them.
+  const { isReadOnly } = usePermissions();
   const token = useAuthStore((s) => s.token);
 
   // ---- Funnel state ----
@@ -288,10 +292,14 @@ const ProgramMetricsTab = ({ programSlug = 'ai-native-builder' }) => {
 
   // ---- Drill table row renderer ----
   const statusSelect = (value, options, onChange) => (
+    isReadOnly ? (
+      <span className="text-xs text-slate-600">{value.replace(/_/g, ' ')}</span>
+    ) : (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="h-7 text-xs w-36 border-[#E3E3E3]"><SelectValue /></SelectTrigger>
       <SelectContent>{options.map(s => <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>)}</SelectContent>
     </Select>
+    )
   );
 
   const renderDrillRow = (row, rowIdx) => {

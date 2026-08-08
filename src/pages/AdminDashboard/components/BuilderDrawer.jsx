@@ -5,6 +5,7 @@ import { Badge } from '../../../components/ui/badge';
 import { X, BookOpen, MessageSquare, Send, Video, ChevronDown, ChevronUp, ExternalLink, FileText, FileSignature, CheckCircle, Clock, Plus, Sparkles, RefreshCw, AlertTriangle, TrendingUp, Target, Lightbulb, Loader2, ClipboardList, Award, User } from 'lucide-react';
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import useAuthStore from '../../../stores/authStore';
+import { usePermissions } from '../../../hooks/usePermissions';
 import { getUserProfilePhoto } from '../../../utils/userPhotoService';
 import BuilderLogEntry from './BuilderLogEntry';
 
@@ -345,6 +346,9 @@ const BuilderDrawer = ({ builder, startDate, endDate, selectedLevel, cohortId, o
   const [loading, setLoading] = useState(true);
   const [builderLogs, setBuilderLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
+  // Read-only accounts (interview candidates) read the full builder picture — grades,
+  // attendance, peer feedback, notes — but cannot change enrollment or add a log.
+  const { isReadOnly } = usePermissions();
   const [showLogModal, setShowLogModal] = useState(false);
   const [showInlineLogForm, setShowInlineLogForm] = useState(false);
   const [inlineLogType, setInlineLogType] = useState('behavioral');
@@ -738,6 +742,15 @@ const BuilderDrawer = ({ builder, startDate, endDate, selectedLevel, cohortId, o
               <h2 className="text-lg font-bold text-[#1E1E1E]">{builder.name}</h2>
               {savingEnrollment ? (
                 <span className="text-[10px] text-slate-400">Saving...</span>
+              ) : isReadOnly ? (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                  enrollmentStatus === 'completed' ? 'bg-green-100 text-green-700' :
+                  enrollmentStatus === 'withdrawn' ? 'bg-red-100 text-red-600' :
+                  enrollmentStatus === 'deferred' ? 'bg-amber-100 text-amber-700' :
+                  'bg-blue-100 text-blue-700'
+                }`}>
+                  {(enrollmentStatus || 'in_progress').replace(/_/g, ' ')}
+                </span>
               ) : (
                 <select
                   value={enrollmentStatus}
@@ -1002,12 +1015,12 @@ const BuilderDrawer = ({ builder, startDate, endDate, selectedLevel, cohortId, o
                         </button>
                       </div>
                     </div>
-                  ) : (
+                  ) : !isReadOnly ? (
                     <button onClick={() => setShowInlineLogForm(true)}
                       className="flex items-center gap-1.5 text-xs font-medium text-[#4242EA] hover:underline">
                       <Plus size={12} /> Add Log
                     </button>
-                  )}
+                  ) : null}
                   {logsLoading ? (
                     <div className="space-y-2">
                       {[1, 2].map(i => <div key={i} className="h-16 bg-[#EFEFEF] rounded animate-pulse" />)}

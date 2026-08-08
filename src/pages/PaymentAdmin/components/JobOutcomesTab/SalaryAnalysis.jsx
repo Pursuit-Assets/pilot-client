@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../../components/ui/card';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
   LineChart, Line, Legend,
 } from 'recharts';
-import { bondAlumni } from './bondData';
+import useAuthStore from '../../../../stores/authStore';
 
 const PURSUIT_PURPLE = '#4242EA';
 const MASTERY_PINK = '#FF33FF';
@@ -36,10 +36,30 @@ const StatCard = ({ label, value, sublabel, color }) => (
   </Card>
 );
 
-const SalaryAnalysis = () => {
+const SalaryAnalysis = ({ cohort }) => {
+  const token = useAuthStore((s) => s.token);
+  const [jobs, setJobs] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError('');
+    const query = cohort && cohort !== 'all' ? `?cohort=${encodeURIComponent(cohort)}` : '';
+    fetch(`${import.meta.env.VITE_API_URL}/api/job-outcomes/salary-jobs${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rows) => { if (!cancelled) setJobs(rows); })
+      .catch((e) => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setIsLoading(false); });
+    return () => { cancelled = true; };
+  }, [token, cohort]);
+
   const data = useMemo(() => {
-    const all = bondAlumni;
-    const withSalary = all.filter(a => a.salary != null && a.salary > 0);
+    // The endpoint already filters to jobs with a positive salary, so every row counts.
+    const withSalary = jobs;
     const salaries = withSalary.map(a => a.salary);
 
     // Histogram: $10k buckets from $10k to $130k
@@ -53,26 +73,27 @@ const SalaryAnalysis = () => {
       });
     }
 
-    // By cohort
-    const byCohort = {};
+    // By cohort. The rows arrive already ordered by cohort number (the label is
+    // "Cohort 10", which does not sort correctly as a string), so insertion order into
+    // the map is the display order — do NOT re-sort here.
+    const byCohort = new Map();
     withSalary.forEach(a => {
       if (!a.cohort) return;
-      (byCohort[a.cohort] = byCohort[a.cohort] || []).push(a.salary);
+      if (!byCohort.has(a.cohort)) byCohort.set(a.cohort, []);
+      byCohort.get(a.cohort).push(a.salary);
     });
-    const cohortData = Object.entries(byCohort)
-      .sort((a, b) => parseInt(a[0]) - parseInt(b[0]))
-      .map(([cohort, arr]) => ({
-        cohort: `Cohort ${cohort}`,
-        median: median(arr),
-        mean: Math.round(mean(arr)),
-        count: arr.length,
-      }));
+    const cohortData = [...byCohort.entries()].map(([cohort, arr]) => ({
+      cohort,
+      median: median(arr),
+      mean: Math.round(mean(arr)),
+      count: arr.length,
+    }));
 
     // By year started
     const byYear = {};
     withSalary.forEach(a => {
-      const year = a.yearStart;
-      if (!year || year === 'Present') return;
+      const year = a.year_start;
+      if (!year) return;
       (byYear[year] = byYear[year] || []).push(a.salary);
     });
     const yearData = Object.entries(byYear)
@@ -87,8 +108,8 @@ const SalaryAnalysis = () => {
     // Top employers by avg salary (min 2 alumni)
     const byOrg = {};
     withSalary.forEach(a => {
-      if (!a.organization) return;
-      (byOrg[a.organization] = byOrg[a.organization] || []).push(a.salary);
+      if (!a.employer_name) return;
+      (byOrg[a.employer_name] = byOrg[a.employer_name] || []).push(a.salary);
     });
     const employerData = Object.entries(byOrg)
       .filter(([, arr]) => arr.length >= 2)
@@ -115,20 +136,35 @@ const SalaryAnalysis = () => {
 
     return {
       total: withSalary.length,
-      min: Math.min(...salaries),
-      max: Math.max(...salaries),
+      // Math.min/max of an empty spread are ∓Infinity, which would render as "$∞" on a
+      // cohort filter that matches nothing.
+      min: salaries.length ? Math.min(...salaries) : null,
+      max: salaries.length ? Math.max(...salaries) : null,
       median: median(salaries),
-      mean: Math.round(mean(salaries)),
+      mean: salaries.length ? Math.round(mean(salaries)) : null,
       histogram,
       cohortData,
       yearData,
       employerData,
       bands,
-      isaEligibleCount: withSalary.filter(a => a.isaEligible).length,
-      currentCount: withSalary.filter(a => a.isCurrent).length,
-      permanentCount: withSalary.filter(a => a.permTemp === 'Permanent').length,
+      isaEligibleCount: withSalary.filter(a => a.isa_eligible).length,
+      currentCount: withSalary.filter(a => a.is_current).length,
     };
-  }, []);
+  }, [jobs]);
+
+  if (isLoading) {
+    return <div className="py-12 text-center text-gray-500 text-sm">Loading salary data…</div>;
+  }
+  if (error) {
+    return <div className="py-12 text-center text-red-600 text-sm">Couldn’t load salary data: {error}</div>;
+  }
+  if (!data.total) {
+    return (
+      <div className="py-12 text-center text-gray-500 text-sm">
+        No salary data for this selection.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
