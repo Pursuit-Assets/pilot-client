@@ -1,21 +1,57 @@
 import React, { useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, ChevronDown, ChevronRight } from 'lucide-react';
+import { Info } from 'lucide-react';
 // Dreyfus 0-5 stage names — shared so this panel can't drift from the Coach tabs
 // (N/A is the administrative "not assessed" state).
 import { DREYFUS_LABELS } from '../../coachDreyfus';
+
+/**
+ * BuilderSnapshotSkillsPanel — the builder's assessed skills, GROUPED BY STAGE.
+ *
+ * WHY BY STAGE, NOT BY CATEGORY (redesigned 2026-08-07)
+ * -----------------------------------------------------
+ * It used to be collapsible taxonomy-category sections, each skill carrying its
+ * own 6-pip Dreyfus meter, with separate Top Strengths / Growth Areas
+ * leaderboards underneath. Two problems:
+ *
+ *   1. Category grouping doesn't answer the question staff bring to this page —
+ *      "what is this builder good at, and what are they weak at?" Stage grouping
+ *      answers it in one glance, and makes the two leaderboards redundant, so
+ *      they were retired rather than left as a third way to say the same thing.
+ *   2. Inside a stage group every skill shares the same level, so a per-row
+ *      meter repeated the group header N times. Nine identical meters is noise.
+ *      The stage header carries the ladder ONCE; each row now shows only what
+ *      actually varies — how consistently the grader agrees, and how many graded
+ *      observations back it. That is what distinguishes a solid Level 2 (four
+ *      observations, full agreement) from a shaky one (one observation), and the
+ *      old design hid it completely.
+ *
+ * The distribution bar moved here from the readiness panel: it IS the skill
+ * distribution, so it belongs beside the skills rather than in a KPI tile.
+ *
+ * Props:
+ *   - skillTaxonomy:    { categories, skills } from /v2-coach-engine
+ *   - skillProficiency: { [slug]: { level 0-5, confidence, observations } } (operative)
+ *   - skillLevels:      { [slug]: 0..100 } legacy fallback when proficiency is absent
+ *   - courseBands:      skill_proficiency_scale.courseBands — the REACHABLE band
+ *                       per course. Not a target (see the server note); it exists
+ *                       to say that 4-5 is out of scope for a first course.
+ *   - courseLevel:      the builder's course ('L1'), for the band note + scope chips
+ */
+
 // Sequential grey → indigo ramp so proficiency progression reads at a glance.
 const LEVEL_RAMP = ['#b9bcc9', '#a3a6e0', '#8186ee', '#5b5fe8', '#3f3fd0', '#2a2a9e'];
 const EMPTY_PIP = '#ECECF3';
 
-// One accent per category (header dots + leaderboard tints).
-const CATEGORY_COLORS = {
-  technical: '#4242EA',
-  product_strategy: '#FB923C',
-  communication_collaboration: '#FF33FF',
-  foundational: '#2a2a9e',
-};
-const FALLBACK_COLOR = '#1E1E1E';
-const colorFor = (cat) => CATEGORY_COLORS[cat] || FALLBACK_COLOR;
+// One-line behavioral gloss per stage, lifted from skill_proficiency_scale so a
+// reader doesn't have to know the Dreyfus model to read the group header.
+const STAGE_GLOSS = [
+  'exposed, but cannot execute even with instructions',
+  'executes with explicit step-by-step guidance',
+  'recognises patterns, still analytical',
+  'works independently, without prompting',
+  'reads situations intuitively, decides deliberately',
+  'perception and action are one; no deliberation needed',
+];
 
 // Map a legacy 0-100 skill_level to a Dreyfus level (only used as a fallback for
 // builders with no skill_proficiency yet — same thresholds as the backfill).
@@ -29,278 +65,290 @@ const legacyToLevel = (v) => {
   return 5;
 };
 
+/** Six pips filled to `level` — the stage ladder, rendered once per group. */
+const StagePips = ({ level }) => (
+  <span className="inline-flex gap-0.5" aria-hidden="true">
+    {[0, 1, 2, 3, 4, 5].map((i) => (
+      <span
+        key={i}
+        className="h-[7px] w-[13px] rounded-[2px]"
+        style={{ backgroundColor: i < level ? LEVEL_RAMP[i] : EMPTY_PIP }}
+      />
+    ))}
+  </span>
+);
+
 /**
- * SegmentMeter — six discrete pips on the grey→indigo ramp, filled up to the
- * Dreyfus level. N/A renders all-empty + muted. Low-confidence / seeded levels
- * render dimmed.
+ * Four ticks showing what share of the trailing window agrees with the recorded
+ * level. This is the per-skill signal the old repeated meters crowded out — a
+ * level backed by one observation reads very differently from the same level
+ * backed by four in agreement.
  */
-const SegmentMeter = ({ level, dim }) => {
-  const fill = Number.isInteger(level) ? level : 0; // pips 0..(level-1) filled
+const ConfidenceTicks = ({ confidence, level }) => {
+  const filled = confidence == null ? 0 : Math.max(1, Math.round(confidence * 4));
+  const color = LEVEL_RAMP[Math.min(5, Math.max(0, level))];
   return (
-    <span className="inline-flex gap-0.5" aria-hidden="true" style={{ opacity: dim ? 0.45 : 1 }}>
-      {[0, 1, 2, 3, 4, 5].map((i) => (
+    <span className="inline-flex gap-0.5 shrink-0" aria-hidden="true">
+      {[0, 1, 2, 3].map((i) => (
         <span
           key={i}
-          className="h-2.5 w-4 rounded-[2px]"
-          style={{ backgroundColor: i < fill ? LEVEL_RAMP[i] : EMPTY_PIP }}
+          className="h-3 w-[5px] rounded-[1px]"
+          style={{ backgroundColor: i < filled ? color : '#E8E8EE' }}
         />
       ))}
     </span>
   );
 };
 
-/**
- * SkillRow — one skill's name + bar meter + level label, with a confidence-aware
- * dim/marker and a tooltip carrying confidence + observation count.
- */
-const SkillRow = ({ skill }) => {
-  const { name, level, label, dim, seeded, confidence, observations } = skill;
-  const tip =
-    level === null
-      ? 'Not assessed yet'
-      : label +
-        (confidence != null ? ` · conf ${confidence.toFixed(2)}` : '') +
-        ` · ${observations} obs` +
-        (seeded ? ' (seeded prior — not yet confirmed by a graded task)' : '');
+const Flag = ({ tone, children, title }) => {
+  const tones = {
+    ahead: 'bg-[#0d9488]/10 text-[#0f766e]',
+    muted: 'bg-[#F3F3F5] text-[#8a8a8a]',
+  };
   return (
-    <li className="flex items-center gap-3 py-1.5" title={tip}>
-      <span className={`flex-1 min-w-0 truncate text-sm ${level === null ? 'text-[#999]' : 'text-[#1E1E1E]'}`}>
-        {name}
-      </span>
-      <SegmentMeter level={level} dim={dim} />
-      <span
-        className={`w-32 shrink-0 text-right text-xs tabular-nums ${level === null ? 'text-[#BBB] italic' : 'font-proxima-bold text-[#1E1E1E]'}`}
-      >
-        {level === null ? 'N/A' : label}
-        {seeded && level !== null ? <span className="ml-1 text-[10px] font-normal text-[#999]">·seed</span> : null}
+    <span
+      title={title}
+      className={`shrink-0 rounded-full px-[7px] py-[2px] text-[9.5px] uppercase tracking-wider font-proxima-bold ${tones[tone]}`}
+    >
+      {children}
+    </span>
+  );
+};
+
+/**
+ * Why a skill's evidence deserves a caveat, or null when it doesn't. Kept
+ * separate from rendering so the thresholds are visible in one place.
+ * Exported for tests.
+ */
+export const evidenceCaveat = ({ observations, confidence }) => {
+  if (observations <= 1) return { tone: 'muted', label: 'Thin evidence', title: `Only ${observations} graded observation` };
+  if (confidence != null && confidence < 0.5) {
+    return {
+      tone: 'muted',
+      label: 'Mixed evidence',
+      title: `Only ${Math.round(confidence * 100)}% of the trailing window sits at this level`,
+    };
+  }
+  return null;
+};
+
+const SkillRow = ({ skill }) => {
+  const caveat = evidenceCaveat(skill);
+  return (
+    <li className="flex items-center gap-3 py-1.5">
+      <span className="flex-1 min-w-0 truncate text-sm text-[#1E1E1E]">{skill.name}</span>
+      {skill.scope === 'notYetTaught' && (
+        <Flag tone="ahead" title={`Taught in ${(skill.learnedIn || []).join('/')} — assessed before the curriculum covers it`}>
+          Ahead · {(skill.learnedIn || []).join('/')}
+        </Flag>
+      )}
+      {caveat && <Flag tone={caveat.tone} title={caveat.title}>{caveat.label}</Flag>}
+      <ConfidenceTicks confidence={skill.confidence} level={skill.level} />
+      <span className="w-[52px] shrink-0 text-right text-[11px] text-[#AAA] tabular-nums">
+        {skill.observations} obs
       </span>
     </li>
   );
 };
 
-/**
- * BuilderSnapshotSkillsPanel
- *
- * Bar-meter skills view: skills grouped into collapsible category sections, each
- * skill rendered as a 6-step Dreyfus meter (0-5, or muted N/A). An assessed/all
- * toggle hides unassessed skills by default. Two leaderboards (Top Strengths,
- * Growth Areas) rank the assessed skills globally.
- *
- * Props:
- *   - skillTaxonomy:    { categories, skills } from /v2-coach-engine
- *   - skillProficiency: { [slug]: { level 0-5, confidence, observations } } (operative)
- *   - skillLevels:      { [slug]: 0..100 } legacy fallback when proficiency is absent
- */
-const BuilderSnapshotSkillsPanel = ({ skillTaxonomy, skillProficiency, skillLevels }) => {
+const BuilderSnapshotSkillsPanel = ({
+  skillTaxonomy,
+  skillProficiency,
+  skillLevels,
+  courseBands,
+  courseLevel,
+}) => {
   const [showAll, setShowAll] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => new Set());
 
-  const { groups, topStrengths, growthAreas, stats } = useMemo(() => {
+  const { stages, assessed, total, histogram } = useMemo(() => {
     const taxSkills = skillTaxonomy?.skills || {};
-    const taxCategories = skillTaxonomy?.categories || {};
     const prof = skillProficiency || {};
     const legacy = skillLevels || {};
 
-    const derive = (slug) => {
-      const p = prof[slug];
-      if (p && Number.isInteger(p.level)) {
-        const observations = Number.isInteger(p.observations) ? p.observations : 0;
-        const confidence = typeof p.confidence === 'number' ? p.confidence : null;
-        const seeded = observations === 0 || (confidence != null && confidence < 0.5);
-        return { level: p.level, confidence, observations, seeded, dim: seeded };
-      }
-      // Fallback: map legacy 0-100 (marked as a seeded/approximate prior).
-      const mapped = legacyToLevel(legacy[slug]);
-      if (mapped != null) return { level: mapped, confidence: null, observations: 0, seeded: true, dim: true };
-      return { level: null, confidence: null, observations: 0, seeded: false, dim: true };
-    };
-
-    const catKeys = Object.keys(taxCategories);
-    const byCat = new Map(catKeys.map((k) => [k, []]));
-    for (const slug of Object.keys(taxSkills)) {
-      const sk = taxSkills[slug];
+    const rows = [];
+    for (const [slug, sk] of Object.entries(taxSkills)) {
       if (!sk) continue;
-      if (!byCat.has(sk.category)) byCat.set(sk.category, []);
-      const d = derive(slug);
-      byCat.get(sk.category).push({
-        slug,
-        name: sk.name || slug,
-        category: sk.category,
-        ...d,
-        label: d.level === null ? 'N/A' : DREYFUS_LABELS[d.level],
-      });
+      const p = prof[slug];
+      let level = null;
+      let confidence = null;
+      let observations = 0;
+      if (p && Number.isInteger(p.level)) {
+        level = p.level;
+        confidence = typeof p.confidence === 'number' ? p.confidence : null;
+        observations = Number.isInteger(p.observations) ? p.observations : 0;
+      } else {
+        // Legacy 0-100 fallback — an approximate prior, so it carries no
+        // observation count and reads as thin evidence.
+        level = legacyToLevel(legacy[slug]);
+      }
+
+      // Where the skill sits relative to the builder's course. Mirrors the
+      // server's buildDistribution: unknown scope counts as in-course rather
+      // than guessing a builder is off-syllabus.
+      const learnedIn = Array.isArray(sk.learnedIn) ? sk.learnedIn : null;
+      const scope =
+        !courseLevel || !learnedIn || learnedIn.length === 0 || learnedIn.includes(courseLevel)
+          ? 'inCourse'
+          : 'notYetTaught';
+
+      rows.push({ slug, name: sk.name || slug, level, confidence, observations, learnedIn, scope });
     }
 
-    const allRows = [];
-    const grp = Array.from(byCat.entries())
-      .filter(([, rows]) => rows.length > 0)
-      .map(([key, rows]) => {
-        rows.sort((a, b) => (b.level ?? -1) - (a.level ?? -1) || a.name.localeCompare(b.name));
-        rows.forEach((r) => allRows.push(r));
-        const assessed = rows.filter((r) => r.level !== null);
-        const avg = assessed.length
-          ? Math.round((assessed.reduce((s, r) => s + r.level, 0) / assessed.length) * 10) / 10
-          : null;
-        return {
-          key,
-          name: taxCategories[key]?.name || key,
-          color: colorFor(key),
-          rows,
-          assessedCount: assessed.length,
-          total: rows.length,
-          avg,
-        };
-      });
+    const hist = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const r of rows) if (Number.isInteger(r.level)) hist[r.level] += 1;
 
-    const assessed = allRows.filter((r) => r.level !== null);
-    const strengths = [...assessed]
-      .sort((a, b) => b.level - a.level || (b.confidence ?? 0) - (a.confidence ?? 0))
-      .slice(0, 5);
-    const growth = [...assessed].sort((a, b) => a.level - b.level).slice(0, 5);
-    const overallAvg = assessed.length
-      ? Math.round((assessed.reduce((s, r) => s + r.level, 0) / assessed.length) * 10) / 10
-      : null;
+    // Highest stage first — the answer to "what are they good at" leads.
+    const byStage = [5, 4, 3, 2, 1, 0]
+      .map((lvl) => ({
+        level: lvl,
+        rows: rows
+          .filter((r) => r.level === lvl)
+          .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0) || a.name.localeCompare(b.name)),
+      }))
+      .filter((g) => g.rows.length > 0);
 
     return {
-      groups: grp,
-      topStrengths: strengths,
-      growthAreas: growth,
-      stats: { total: allRows.length, assessed: assessed.length, avg: overallAvg },
+      stages: byStage,
+      assessed: rows.filter((r) => Number.isInteger(r.level)).length,
+      total: rows.length,
+      histogram: hist,
     };
-  }, [skillTaxonomy, skillProficiency, skillLevels]);
+  }, [skillTaxonomy, skillProficiency, skillLevels, courseLevel]);
 
-  const toggle = (key) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
+  const notAssessed = total - assessed;
+  const band = (courseBands || []).find((b) => b.course === courseLevel) || null;
 
   return (
     <section className="rounded-2xl ring-1 ring-[#E3E3E3] shadow-md bg-white p-6 md:p-8 font-proxima">
-      <header className="mb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+      <header className="mb-4 flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-proxima-bold text-[#1E1E1E]">Skill Profile</h2>
-          <p className="text-sm text-[#666] mt-1">
-            Proficiency on the Dreyfus scale (0 Below Novice → 5 Expert) across the skill taxonomy.
+          <h2 className="text-2xl font-proxima-bold text-[#1E1E1E]">Skill profile</h2>
+          <p className="text-sm text-[#666] mt-1 max-w-3xl">
+            Grouped by stage, strongest first.
+            {band && (
+              <>
+                {' '}In {band.course} the reachable band is{' '}
+                <span className="font-proxima-bold text-[#1E1E1E]">
+                  {DREYFUS_LABELS[band.reachable[0]]}–{DREYFUS_LABELS[band.reachable[band.reachable.length - 1]]}
+                </span>{' '}
+                — {band.note}
+              </>
+            )}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {stats.total > 0 && (
-            <div className="flex items-center gap-3 text-xs text-[#666]">
-              <span>
-                <span className="text-[#1E1E1E] font-proxima-bold">{stats.assessed}</span>
-                {' / '}<span>{stats.total}</span>{' assessed'}
-              </span>
-              {stats.avg != null && (
-                <>
-                  <span aria-hidden="true" className="text-[#C8C8C8]">·</span>
-                  <span>Avg <span className="text-[#1E1E1E] font-proxima-bold">{stats.avg}</span>{' / 5'}</span>
-                </>
-              )}
-            </div>
-          )}
-          {/* assessed / all toggle */}
-          <div className="inline-flex rounded-lg border border-[#E3E3E3] p-0.5 text-xs">
-            <button
-              type="button"
-              onClick={() => setShowAll(false)}
-              className={`px-2.5 py-1 rounded-md font-proxima ${!showAll ? 'bg-[#4242EA] text-white' : 'text-[#666] hover:bg-[#F5F5F5]'}`}
-            >
-              Assessed
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAll(true)}
-              className={`px-2.5 py-1 rounded-md font-proxima ${showAll ? 'bg-[#4242EA] text-white' : 'text-[#666] hover:bg-[#F5F5F5]'}`}
-            >
-              All
-            </button>
-          </div>
+        <div className="inline-flex shrink-0 rounded-lg border border-[#E3E3E3] p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setShowAll(false)}
+            className={`px-2.5 py-1 rounded-md font-proxima ${!showAll ? 'bg-[#4242EA] text-white' : 'text-[#666] hover:bg-[#F5F5F5]'}`}
+          >
+            Assessed
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className={`px-2.5 py-1 rounded-md font-proxima ${showAll ? 'bg-[#4242EA] text-white' : 'text-[#666] hover:bg-[#F5F5F5]'}`}
+          >
+            All {total}
+          </button>
         </div>
       </header>
 
-      {stats.total === 0 ? (
+      {total === 0 ? (
         <div className="py-16 text-center text-[#999] italic">No skills available yet.</div>
       ) : (
         <>
-          {/* Collapsible category groups of bar meters */}
-          <div className="space-y-3">
-            {groups.map((g) => {
-              const rows = showAll ? g.rows : g.rows.filter((r) => r.level !== null);
-              if (rows.length === 0) return null; // hide empty categories in "assessed" view
-              const isOpen = !collapsed.has(g.key);
-              return (
-                <div key={g.key} className="rounded-xl border border-[#F0F0F0] bg-[#FAFAFA] overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => toggle(g.key)}
-                    aria-expanded={isOpen}
-                    className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-[#F5F5F5] transition-colors"
-                  >
-                    {isOpen ? <ChevronDown className="w-4 h-4 text-[#999]" /> : <ChevronRight className="w-4 h-4 text-[#999]" />}
-                    <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: g.color }} />
-                    <span className="text-sm font-proxima-bold text-[#1E1E1E]">{g.name}</span>
-                    <span className="text-xs text-[#999]">({g.assessedCount}/{g.total})</span>
-                    {g.avg != null && (
-                      <span className="ml-auto text-xs text-[#666]">Avg <span className="font-proxima-bold text-[#1E1E1E]">{g.avg}</span></span>
-                    )}
-                  </button>
-                  {isOpen && (
-                    <ul className="px-4 pb-3 divide-y divide-[#F0F0F0]">
-                      {rows.map((r) => <SkillRow key={r.slug} skill={r} />)}
-                    </ul>
-                  )}
+          {/* Distribution — moved here from the readiness panel, where it sat in
+              a KPI tile. It is the skill distribution; it belongs with the skills. */}
+          <div className="flex gap-0.5 h-[26px] rounded-lg overflow-hidden">
+            {[5, 4, 3, 2, 1, 0]
+              .filter((lvl) => histogram[lvl] > 0)
+              .map((lvl) => (
+                <div
+                  key={lvl}
+                  className="flex items-center justify-center text-[11.5px] font-proxima-bold text-white"
+                  style={{ flex: histogram[lvl], backgroundColor: LEVEL_RAMP[lvl], minWidth: 22 }}
+                  title={`${histogram[lvl]} skill${histogram[lvl] === 1 ? '' : 's'} at ${DREYFUS_LABELS[lvl]}`}
+                >
+                  {histogram[lvl]}
                 </div>
-              );
-            })}
+              ))}
+            {notAssessed > 0 && (
+              <div
+                className="flex items-center justify-center text-[11.5px] text-[#9a9a9a]"
+                style={{ flex: notAssessed, backgroundColor: '#F1F1F3' }}
+                title={`${notAssessed} skills the curriculum hasn't reached yet`}
+              >
+                {notAssessed} not assessed
+              </div>
+            )}
           </div>
 
-          {/* Leaderboards */}
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-            <Leaderboard
-              icon={<TrendingUp className="w-4 h-4 text-[#4242EA]" />}
-              title="Top Strengths"
-              empty="No assessed skills yet."
-              items={topStrengths}
-            />
-            <Leaderboard
-              icon={<TrendingDown className="w-4 h-4 text-[#FB923C]" />}
-              title="Growth Areas"
-              empty="No assessed skills yet."
-              items={growthAreas}
-              variant="growth"
-            />
+          {/* Legend — the ticks are meaningless without it. */}
+          <div className="flex items-center gap-4 mt-2 text-[11px] text-[#AAA]">
+            <span>Bar width = share of assessed skills at that stage.</span>
+            <span className="ml-auto inline-flex items-center gap-1.5">
+              <ConfidenceTicks confidence={0.5} level={2} />
+              how consistently the grader agrees ·{' '}
+              <span className="font-proxima-bold text-[#666]">obs</span> = graded observations
+            </span>
           </div>
+
+          {stages.map((g) => (
+            <div key={g.level} className="mt-5">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-[#EDEDED] mb-2.5">
+                <StagePips level={g.level} />
+                <span className="text-[13px] font-proxima-bold text-[#1E1E1E]">{DREYFUS_LABELS[g.level]}</span>
+                <span className="text-[11.5px] text-[#AAA] truncate">— {STAGE_GLOSS[g.level]}</span>
+                <span className="ml-auto shrink-0 text-[11px] text-[#AAA] font-proxima-bold tracking-wider">
+                  {g.rows.length} SKILL{g.rows.length === 1 ? '' : 'S'}
+                </span>
+              </div>
+              <ul className="grid grid-cols-1 lg:grid-cols-2 gap-x-8">
+                {g.rows.map((r) => <SkillRow key={r.slug} skill={r} />)}
+              </ul>
+            </div>
+          ))}
+
+          {notAssessed > 0 && (
+            <div className="mt-5">
+              {showAll ? (
+                <div className="rounded-xl border border-[#EFEFF2] bg-[#FAFAFB] p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-[#AAA] font-proxima-bold mb-2">
+                    Not assessed — {notAssessed}
+                  </div>
+                  <ul className="grid grid-cols-1 lg:grid-cols-2 gap-x-8">
+                    {Object.entries(skillTaxonomy?.skills || {})
+                      .filter(([slug]) => !Number.isInteger(skillProficiency?.[slug]?.level)
+                        && legacyToLevel(skillLevels?.[slug]) == null)
+                      .sort((a, b) => (a[1]?.name || a[0]).localeCompare(b[1]?.name || b[0]))
+                      .map(([slug, sk]) => (
+                        <li key={slug} className="py-1.5 text-sm text-[#999] truncate">{sk?.name || slug}</li>
+                      ))}
+                  </ul>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowAll(true)}
+                  className="w-full flex items-center gap-2.5 rounded-xl border border-[#EFEFF2] bg-[#FAFAFB] px-3.5 py-3 text-left hover:bg-[#F5F5F7] transition-colors"
+                >
+                  <Info className="w-[15px] h-[15px] text-[#9a9a9a] shrink-0" />
+                  <span className="text-[12.5px] text-[#666]">
+                    <span className="font-proxima-bold text-[#1E1E1E]">
+                      {notAssessed} of {total} skills not assessed yet.
+                    </span>{' '}
+                    Coverage, not weakness — the curriculum hasn't reached them.
+                  </span>
+                  <span className="ml-auto shrink-0 text-xs font-proxima-bold text-[#4242EA]">Show all ⌄</span>
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
     </section>
   );
 };
-
-/** Leaderboard — ranked list with a 6-step meter per skill. */
-const Leaderboard = ({ icon, title, items, empty, variant = 'strength' }) => (
-  <div>
-    <h3 className="flex items-center gap-2 text-xs uppercase tracking-wider text-[#666] font-proxima-bold">
-      {icon}
-      {title}
-    </h3>
-    {items.length === 0 ? (
-      <p className="mt-3 text-sm text-[#999] italic">{empty}</p>
-    ) : (
-      <ul className="mt-3 space-y-2.5">
-        {items.map((item) => (
-          <li key={item.slug} className="flex items-center gap-3" title={item.label}>
-            <span className="flex-1 min-w-0 truncate text-sm text-[#1E1E1E]">{item.name}</span>
-            <SegmentMeter level={item.level} dim={item.dim} />
-            <span className="w-28 shrink-0 text-right text-xs font-proxima-bold tabular-nums text-[#1E1E1E]">
-              {item.level} {item.label}
-            </span>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-);
 
 export default BuilderSnapshotSkillsPanel;
