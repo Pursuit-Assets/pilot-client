@@ -1,23 +1,19 @@
-// Chapter gate / header. Two lives:
+// Chapter gate. Two lives:
 //  - pending: the full-width transition card the conversation STOPS at —
 //    the next chapter's coach turn starts only when the builder taps
 //    "Let's go" (which sends the chapter_continue meta turn).
-//  - passed: the same item collapses into the chapter HEADER, permanently
-//    marking the boundary in the transcript.
+//  - passed: a quiet '✓ continued' end-marker at the bottom of the finished
+//    chapter's panel (each chapter carries its own header, so the old
+//    collapse-into-header behavior is redundant in the full-screen layout).
 function InterstitialCard({ part, total, title, description, pending, disabled, onContinue }) {
   if (!pending) {
     return (
-      <div className="my-8" role="separator">
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-stardust" />
-          <div className="text-center">
-            <div className="text-[10px] font-proxima-bold uppercase tracking-widest text-gray-400">
-              Part {part} of {total}
-            </div>
-            <div className="text-sm font-proxima-bold text-pursuit-purple">{title}</div>
-          </div>
-          <div className="flex-1 h-px bg-stardust" />
-        </div>
+      <div className="my-8 flex items-center gap-3" role="separator">
+        <div className="flex-1 h-px bg-stardust" />
+        <span className="text-xs font-proxima font-semibold text-gray-400">
+          ✓ Continued to Part {part} — {title}
+        </span>
+        <div className="flex-1 h-px bg-stardust" />
       </div>
     );
   }

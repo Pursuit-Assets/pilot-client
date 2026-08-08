@@ -118,7 +118,7 @@ export async function abandonSession(token, sessionId) {
  * `signal` is an AbortSignal — abort to tear down an in-flight stream
  * (e.g., on unmount). Returns when the stream ends, errors, or is aborted.
  */
-export async function streamChat(token, sessionId, message, { onText, onCoachMessage, onStage, onStyleChoices, onBeat, onBeatFollowup, onInterstitial, onDone, onError, signal, meta } = {}) {
+export async function streamChat(token, sessionId, message, { onText, onCoachMessage, onStage, onStyleChoices, onStyleResolved, onBeat, onBeatFollowup, onInterstitial, onDone, onError, signal, meta } = {}) {
   const res = await fetch(
     `${API_URL}/api/onboarding-session/${encodeURIComponent(sessionId)}/chat`,
     {
@@ -181,6 +181,8 @@ export async function streamChat(token, sessionId, message, { onText, onCoachMes
         onBeatFollowup?.(data);
       } else if (data.type === 'interstitial') {
         onInterstitial?.(data);
+      } else if (data.type === 'style_resolved') {
+        onStyleResolved?.(data);
       } else if (data.type === 'done') {
         sawDone = true;
         onDone?.(data);

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor, within } from '@testing-library/react';
 
 // ---------------------------------------------------------------------------
 // Mock useAuthStore — selector-based (component reads s.token).
@@ -275,6 +275,15 @@ describe('OnboardingInterface', () => {
 // is inert unless /start returns redesign:true or the stream emits control
 // events, so the legacy tests above double as the knob-off regression suite.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Redesign ("Meet Your Coach" v2) — full-screen chapter panels. All three
+// panels are MOUNTED at once inside a sliding track (so a chapter title
+// appears in both the ChapterNav and its own panel header — queries must be
+// scoped or count-aware). The taste test is a focused TastePanel fed by
+// beat/style control events, not chat bubbles. Everything here is inert
+// unless /start returns redesign:true, so the legacy tests above double as
+// the knob-off regression suite.
+// ---------------------------------------------------------------------------
 describe('OnboardingInterface — redesign', () => {
   const REDESIGN_START = {
     sessionId: 'sess-1',
@@ -284,88 +293,69 @@ describe('OnboardingInterface — redesign', () => {
     stylePick: null,
   };
 
-  it('renders the labeled StageDots from the /start payload (no build chrome — the workshop material lives in the coach\'s context only)', async () => {
+  // The panel for a chapter, addressed by its aria-label (set on <section>).
+  const panel = (title) => screen.getByRole('region', { name: title });
+  const beat = (n, family, label, content) =>
+    ({ index: n, total: 4, family, label, description: `${label} description`, content });
+
+  it('renders three chapter panels + tappable chapter nav (no build chrome — workshop material lives in the coach context only)', async () => {
     startSession.mockResolvedValue(REDESIGN_START);
     await renderOnboarding();
-    // Labeled dots — 3 chapters
-    expect(screen.getByText('Getting to Know You')).toBeInTheDocument();
-    expect(screen.getByText('How You Learn')).toBeInTheDocument();
-    expect(screen.getByText('Looking Ahead')).toBeInTheDocument();
+
+    // Nav has all three chapters…
+    const nav = screen.getByRole('navigation', { name: /chapters/i });
+    expect(within(nav).getByText('Getting to Know You')).toBeInTheDocument();
+    expect(within(nav).getByText('How You Learn')).toBeInTheDocument();
+    expect(within(nav).getByText('Looking Ahead')).toBeInTheDocument();
+
+    // …and each chapter is its own panel with its own header.
+    expect(panel('Getting to Know You')).toBeInTheDocument();
+    expect(panel('How You Learn')).toBeInTheDocument();
+    expect(panel('Looking Ahead')).toBeInTheDocument();
+    expect(within(panel('Getting to Know You')).getByText(/Part 1 of 3/i)).toBeInTheDocument();
   });
 
-  it('legacy start payload renders NO redesign chrome', async () => {
+  it('legacy start payload renders the single-scroll surface, no chapter chrome', async () => {
     startSession.mockResolvedValue({ sessionId: 'sess-1', resumed: false, buildReviewReady: true });
     await renderOnboarding();
-    expect(screen.queryByText('Getting to Know You')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: /chapters/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Getting to Know You' })).not.toBeInTheDocument();
   });
 
-  it('style_choices event renders the 4 tap cards; a tap sends the structured pick and becomes a sent user message', async () => {
+  it('coach turns land in the panel for the chapter that was current when they arrived', async () => {
     startSession.mockResolvedValue(REDESIGN_START);
-    // Opening stream: coach_message beats + the style_choices control event.
-    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onCoachMessage, onStage, onStyleChoices, onDone }) => {
-      onText?.({ content: 'Let me show you the same idea four ways.' });
-      onCoachMessage?.({ content: '**Tell me** — plain explanation beat' });
-      onCoachMessage?.({ content: '**Show me** — worked example beat' });
-      onStage?.({ value: 'learn' });
-      onStyleChoices?.({
-        options: [
-          { family: 'tell_me', label: 'Tell me', description: 'Explain it plainly' },
-          { family: 'show_me', label: 'Show me', description: 'Worked example first' },
-          { family: 'ask_me', label: 'Ask me', description: 'Questions first' },
-          { family: 'let_me_try', label: 'Let me try', description: 'Real problem first' },
-        ],
-      });
-      onDone?.({ sequenceNumber: 5 });
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onDone }) => {
+      onText?.({ content: 'Tell me about your build.' });
+      onDone?.({ sequenceNumber: 1 });
     });
     await renderOnboarding();
-
-    // Beats arrived as complete bubbles.
-    expect(screen.getByText(/plain explanation beat/)).toBeInTheDocument();
-    expect(screen.getByText(/worked example beat/)).toBeInTheDocument();
-    // Cards rendered.
-    const showMe = screen.getByRole('button', { name: /show me/i });
-    expect(screen.getByRole('button', { name: /tell me/i })).toBeInTheDocument();
-
-    // Tap → second streamChat call with empty message + structured meta.
-    streamChat.mockClear();
-    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onDone }) => {
-      onText?.({ content: 'Worked examples it is — want to try one?' });
-      onDone?.({ sequenceNumber: 7 });
-    });
-    await act(async () => {
-      fireEvent.click(showMe);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(streamChat).toHaveBeenCalledTimes(1);
-    expect(streamChat.mock.calls[0][2]).toBe('');
-    expect(streamChat.mock.calls[0][3].meta).toEqual({ style_pick: 'show_me' });
-
-    // Cards replaced by a normal user bubble at the same spot — the pick
-    // behaves exactly like a sent message. Tap buttons gone.
-    expect(screen.queryByRole('button', { name: /tell me/i })).not.toBeInTheDocument();
-    expect(screen.getByText('Show me — Worked example first')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(panel('Getting to Know You')).getByText(/Tell me about your build/)).toBeInTheDocument();
+    }, { timeout: 3000 });
+    // Not leaked into the other chapters.
+    expect(within(panel('How You Learn')).queryByText(/Tell me about your build/)).not.toBeInTheDocument();
   });
 
-  it('a chapter boundary renders the interstitial GATE; "Let\'s go" sends chapter_continue and collapses it to a header', async () => {
+  it('a chapter boundary renders the interstitial GATE; "Let\'s go" sends chapter_continue and opens the taste panel', async () => {
     startSession.mockResolvedValue(REDESIGN_START);
-    // Closing turn + interstitial (the server's boundary response).
-    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onInterstitial, onDone }) => {
-      onText?.({ content: 'Loved hearing all that.' });
+    // The server's boundary response: validated closing turn + gate card.
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onCoachMessage, onInterstitial, onDone }) => {
+      onCoachMessage?.({ content: 'Loved hearing all of that.' });
       onInterstitial?.({ stage: 'learn', part: 2, total: 3, title: 'How You Learn', description: 'React to whichever lands.' });
       onDone?.({ sequenceNumber: 3 });
     });
     await renderOnboarding();
 
-    // The gate card is up with its continue button; the conversation stopped.
-    expect(screen.getByText('Part 2 of 3')).toBeInTheDocument();
-    const go = screen.getByRole('button', { name: /let'?s go/i });
+    // Gate is up inside the CLOSING chapter's panel — the conversation stopped.
+    const story = panel('Getting to Know You');
+    expect(within(story).getByText('Part 2 of 3')).toBeInTheDocument();
+    const go = within(story).getByRole('button', { name: /let'?s go/i });
 
-    // Tapping continue sends the chapter_continue meta and delivers beat 1.
+    // Tapping continue sends chapter_continue; the server answers with beat 1.
     streamChat.mockClear();
     streamChat.mockImplementationOnce(async (_t, _s, _m, { onStage, onBeat, onDone }) => {
       onStage?.({ value: 'learn', label: 'How You Learn' });
-      onBeat?.({ index: 1, total: 4, family: 'tell_me', label: 'Tell me', content: 'TELL beat body' });
+      onBeat?.(beat(1, 'tell_me', 'Tell me', 'TELL beat body'));
       onDone?.({ sequenceNumber: 5 });
     });
     await act(async () => {
@@ -375,23 +365,47 @@ describe('OnboardingInterface — redesign', () => {
     });
     expect(streamChat.mock.calls[0][2]).toBe('');
     expect(streamChat.mock.calls[0][3].meta).toEqual({ chapter_continue: 'learn' });
-    // Gate collapsed to the header (separator role), button gone.
-    expect(screen.queryByRole('button', { name: /let'?s go/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('separator')).toBeInTheDocument();
-    // Beat 1 rendered with its reaction chips.
-    expect(screen.getByText(/Way 1 of 4/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /that clicked/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /next way/i })).toBeInTheDocument();
+
+    // Gate consumed; the taste panel opened in the LEARN panel with way 1.
+    expect(within(story).queryByRole('button', { name: /let'?s go/i })).not.toBeInTheDocument();
+    const learn = panel('How You Learn');
+    expect(within(learn).getByText(/Way 1 of 4/i)).toBeInTheDocument();
+    expect(within(learn).getByText('TELL beat body')).toBeInTheDocument();
+    expect(within(learn).getByRole('button', { name: /that clicked/i })).toBeInTheDocument();
+    expect(within(learn).getByRole('button', { name: /next way/i })).toBeInTheDocument();
   });
 
-  it('beat reactions: "That clicked" becomes a sent message + the followup chips send the meta', async () => {
-    startSession.mockResolvedValue(REDESIGN_START);
-    streamChat.mockImplementationOnce(async (_t, _s, _m, { onBeat, onStage, onDone }) => {
+  it('the step strip lets you flip BACK to a previously seen way (read-only compare)', async () => {
+    startSession.mockResolvedValue({ ...REDESIGN_START, stage: 'learn' });
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onStage, onBeat, onDone }) => {
       onStage?.({ value: 'learn' });
-      onBeat?.({ index: 2, total: 4, family: 'show_me', label: 'Show me', content: 'SHOW beat body' });
+      onBeat?.(beat(1, 'tell_me', 'Tell me', 'TELL beat body'));
+      onBeat?.(beat(2, 'show_me', 'Show me', 'SHOW beat body'));
       onDone?.({ sequenceNumber: 4 });
     });
     await renderOnboarding();
+    const learn = panel('How You Learn');
+
+    // Latest way is showing; step 1 is seen and tappable.
+    expect(within(learn).getByText('SHOW beat body')).toBeInTheDocument();
+    const step1 = within(learn).getByRole('tab', { name: 'Way 1' });
+    await act(async () => { fireEvent.click(step1); await Promise.resolve(); });
+
+    // Flipped back — no server round-trip for a read-only compare.
+    expect(within(learn).getByText('TELL beat body')).toBeInTheDocument();
+    expect(within(learn).queryByText('SHOW beat body')).not.toBeInTheDocument();
+    expect(streamChat).toHaveBeenCalledTimes(1); // just the opening call
+  });
+
+  it('"That clicked" becomes a sent message + the followup chips send the meta', async () => {
+    startSession.mockResolvedValue({ ...REDESIGN_START, stage: 'learn' });
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onStage, onBeat, onDone }) => {
+      onStage?.({ value: 'learn' });
+      onBeat?.(beat(2, 'show_me', 'Show me', 'SHOW beat body'));
+      onDone?.({ sequenceNumber: 4 });
+    });
+    await renderOnboarding();
+    const learn = panel('How You Learn');
 
     streamChat.mockClear();
     streamChat.mockImplementationOnce(async (_t, _s, _m, { onBeatFollowup, onDone }) => {
@@ -399,67 +413,103 @@ describe('OnboardingInterface — redesign', () => {
       onDone?.({ sequenceNumber: 5 });
     });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /that clicked/i }));
+      fireEvent.click(within(learn).getByRole('button', { name: /that clicked/i }));
       await Promise.resolve();
       await Promise.resolve();
     });
     expect(streamChat.mock.calls[0][3].meta).toEqual({ beat_reaction: { value: 'clicked' } });
-    expect(screen.getByText('💡 That clicked')).toBeInTheDocument(); // sent-message semantics
+    // Sent-message semantics — the reaction reads as the builder's turn.
+    expect(within(learn).getByText(/That clicked — Show me/)).toBeInTheDocument();
 
-    // Followup chips arrived; "Keep moving" sends the meta as a sent message.
+    // Followup chips arrived; "Keep moving" sends its meta.
     streamChat.mockClear();
-    streamChat.mockImplementationOnce(async (_t, _s, _m, { onText, onDone }) => {
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onStyleResolved, onText, onDone }) => {
+      onStyleResolved?.({ family: 'show_me', label: 'Show me', description: 'Walk me through a worked example first' });
       onText?.({ content: 'Worked examples it is.' });
       onDone?.({ sequenceNumber: 7 });
     });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /keep moving/i }));
+      fireEvent.click(within(learn).getByRole('button', { name: /keep moving/i }));
       await Promise.resolve();
       await Promise.resolve();
     });
     expect(streamChat.mock.calls[0][3].meta).toEqual({ beat_followup: { value: 'move_on' } });
-    expect(screen.getByText('Keep moving')).toBeInTheDocument();
+
+    // style_resolved collapses the panel into the one-line pick summary.
+    expect(within(learn).queryByText('SHOW beat body')).not.toBeInTheDocument();
+    expect(within(learn).getByText(/How you learn:/)).toBeInTheDocument();
+    expect(within(learn).getByText('Show me')).toBeInTheDocument();
   });
 
-  it('resume mid-taste-test re-activates the LAST beat\'s chips; a pending gate re-renders the interstitial', async () => {
+  it('multi-click resolution renders the final pick cards inside the panel', async () => {
+    startSession.mockResolvedValue({ ...REDESIGN_START, stage: 'learn' });
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onStage, onBeat, onStyleChoices, onDone }) => {
+      onStage?.({ value: 'learn' });
+      onBeat?.(beat(4, 'let_me_try', 'Let me try', 'TRY beat body'));
+      onStyleChoices?.({
+        prompt: 'A few of these landed — which one should I lead with?',
+        options: [
+          { family: 'tell_me', label: 'Tell me', description: 'Explain it plainly' },
+          { family: 'let_me_try', label: 'Let me try', description: 'Real problem first' },
+        ],
+      });
+      onDone?.({ sequenceNumber: 6 });
+    });
+    await renderOnboarding();
+    const learn = panel('How You Learn');
+
+    // Only the two clicked families are offered.
+    expect(within(learn).getByRole('button', { name: /tell me/i })).toBeInTheDocument();
+    expect(within(learn).getByRole('button', { name: /let me try/i })).toBeInTheDocument();
+    expect(within(learn).queryByRole('button', { name: /^show me/i })).not.toBeInTheDocument();
+
+    streamChat.mockClear();
+    streamChat.mockImplementationOnce(async (_t, _s, _m, { onStyleResolved, onDone }) => {
+      onStyleResolved?.({ family: 'tell_me', label: 'Tell me', description: 'Explain it to me plainly' });
+      onDone?.({ sequenceNumber: 8 });
+    });
+    await act(async () => {
+      fireEvent.click(within(learn).getByRole('button', { name: /tell me/i }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(streamChat.mock.calls[0][3].meta).toEqual({ style_pick: 'tell_me' });
+  });
+
+  it('resume rebuilds the taste panel from persisted beat turns and re-renders a pending gate', async () => {
     startSession.mockResolvedValue({ ...REDESIGN_START, resumed: true, stage: 'learn' });
     getSession.mockResolvedValue({
-      session: { stage: 'learn', style_pick: null, beats_delivered_at: 'x', beat_index: 2, interstitial_shown_for: 'learn' },
+      session: {
+        stage: 'learn', style_pick: null, beats_delivered_at: 'x', beat_index: 2,
+        beat_clicks: ['tell_me'], interstitial_shown_for: 'learn',
+      },
       messages: [
-        { role: 'coach', content: '**Way 1 of 4 — Tell me:** TELL beat body' },
-        { role: 'coach', content: '**Way 2 of 4 — Show me:** SHOW beat body' },
+        { role: 'coach', content: 'Closing chapter one.', stage: 'story' },
+        { role: 'coach', content: '**Way 1 of 4 — Tell me:** TELL beat body', stage: 'learn' },
+        { role: 'coach', content: '**Way 2 of 4 — Show me:** SHOW beat body', stage: 'learn' },
       ],
     });
     await renderOnboarding();
-    // Both beats hydrate as cards; only the LAST one is active with chips.
-    expect(screen.getByText(/Way 1 of 4/i)).toBeInTheDocument();
-    expect(screen.getByText(/Way 2 of 4/i)).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /that clicked/i })).toHaveLength(1);
-    expect(streamChat).not.toHaveBeenCalled();
 
-    // Separate resume shape: builder left AT a chapter boundary → gate card.
-    cleanup();
-    vi.clearAllMocks();
-    startSession.mockResolvedValue({ ...REDESIGN_START, resumed: true, stage: 'story' });
-    getSession.mockResolvedValue({
-      session: { stage: 'story', style_pick: null, beats_delivered_at: null, beat_index: 0, interstitial_shown_for: 'learn' },
-      messages: [
-        { role: 'coach', content: 'Closing the first chapter…' },
-        { role: 'builder', content: 'ok' },
-      ],
-    });
-    await renderOnboarding();
-    expect(screen.getByText('Part 2 of 3')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /let'?s go/i })).toBeInTheDocument();
+    // Beats rebuilt into the panel (latest showing), earlier one reachable.
+    const learn = panel('How You Learn');
+    expect(within(learn).getByText('SHOW beat body')).toBeInTheDocument();
+    expect(within(learn).getByRole('tab', { name: 'Way 1' })).toBeInTheDocument();
+    // Chat turns went to their tagged chapter.
+    expect(within(panel('Getting to Know You')).getByText(/Closing chapter one/)).toBeInTheDocument();
+    // No opening call — prior turns existed.
+    expect(streamChat).not.toHaveBeenCalled();
   });
 
-  it('resume with a recorded pick shows the chip, not the cards', async () => {
+  it('a resolved pick on resume shows the summary, not the panel', async () => {
     startSession.mockResolvedValue({ ...REDESIGN_START, resumed: true, stage: 'ahead', stylePick: 'ask_me' });
     getSession.mockResolvedValue({
-      session: { stage: 'ahead', style_pick: 'ask_me', beats_delivered_at: '2026-08-04T00:00:00Z' },
-      messages: [{ role: 'coach', content: 'Earlier…' }, { role: 'builder', content: 'hi' }],
+      session: { stage: 'ahead', style_pick: 'ask_me', beats_delivered_at: 'x', beat_index: 4 },
+      messages: [{ role: 'coach', content: '**Way 1 of 4 — Tell me:** TELL beat body', stage: 'learn' }],
     });
     await renderOnboarding();
-    expect(screen.queryByRole('button', { name: /tell me/i })).not.toBeInTheDocument();
+    const learn = panel('How You Learn');
+    expect(within(learn).queryByText('TELL beat body')).not.toBeInTheDocument();
+    expect(within(learn).getByText(/How you learn:/)).toBeInTheDocument();
   });
 });
