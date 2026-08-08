@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import useAuthStore from '../../../stores/authStore';
 import { usePermissions } from '../../../hooks/usePermissions';
-import { listSuites, runEval, listBatches, getBatch, getCase } from '../../../services/coachEvalsApi';
+import { listSuites, runEval, listBatches, getBatch, getCase, saveAnnotation } from '../../../services/coachEvalsApi';
 import { SkillAssessmentTable, gradeReason, topLevel, levelLabel, GRADE_ERROR_TEXT } from '../coachDreyfus';
 import { LLM_MODELS } from '../../../constants/llmModels';
 
@@ -158,6 +158,137 @@ const CoachGradePanel = ({ grade }) => {
 };
 
 /** Expanded per-case detail: coach's Dreyfus grade beside the judge verdicts. */
+// Reviewer's human call on a case — the ground truth the Judge Alignment report
+// scores judges against. Never changes the coach's grade or a builder record.
+const OUTCOME_OPTS = [['agree', 'Agree'], ['disagree', 'Disagree'], ['unsure', 'Unsure']];
+const FLAG_OPTS = [
+  ['grading_too_lenient', 'Grading too lenient'],
+  ['grading_too_harsh', 'Grading too harsh'],
+  ['challenge_off_target', 'Challenge off-target'],
+  ['system_error', 'System / grading error'],
+];
+const LEVEL_OPTS = ['na', '0', '1', '2', '3', '4', '5'];
+
+const AnnotationPanel = ({ token, caseId, coachGrade, dimensionKeys, initial }) => {
+  const assessments = Array.isArray(coachGrade?.skillAssessments) ? coachGrade.skillAssessments : [];
+  const [outcome, setOutcome] = useState(initial?.outcome_verdict || '');
+  const [skillLevels, setSkillLevels] = useState(() => {
+    const m = {};
+    for (const a of assessments) m[a.skill_slug] = Number.isInteger(a.level) ? String(a.level) : 'na';
+    for (const s of (initial?.skill_levels || [])) if (s.skill_slug) m[s.skill_slug] = s.human_level == null ? 'na' : String(s.human_level);
+    return m;
+  });
+  const [dimRatings, setDimRatings] = useState(() => {
+    const m = {};
+    const r = initial?.dimension_ratings || {};
+    for (const d of dimensionKeys) if (typeof r[d]?.pass === 'boolean') m[d] = r[d].pass;
+    return m;
+  });
+  const [note, setNote] = useState(initial?.note || '');
+  const [flags, setFlags] = useState(initial?.flags || []);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const toggleFlag = (f) => setFlags((p) => (p.includes(f) ? p.filter((x) => x !== f) : [...p, f]));
+
+  const save = async () => {
+    setSaving(true); setSaved(false);
+    try {
+      const skillLevelsBody = assessments.map((a) => {
+        const v = skillLevels[a.skill_slug];
+        return {
+          skill_slug: a.skill_slug,
+          coach_level: Number.isInteger(a.level) ? a.level : null,
+          human_level: v == null || v === 'na' ? null : Number(v),
+        };
+      });
+      const dimensionRatings = {};
+      for (const [d, pass] of Object.entries(dimRatings)) if (typeof pass === 'boolean') dimensionRatings[d] = { pass };
+      await saveAnnotation(token, caseId, { outcomeVerdict: outcome || null, skillLevels: skillLevelsBody, dimensionRatings, note, flags });
+      setSaved(true);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="mt-5 border-t border-[#E3E3E3] pt-4">
+      <Caps className="mb-1">Your review</Caps>
+      <p className="text-[11px] text-slate-400 mb-3">Ground truth for the Judge Alignment report — this never changes the coach&apos;s grade or a builder record.</p>
+
+      <div className="mb-4">
+        <div className="text-[11px] font-medium text-slate-500 mb-1.5">Do you agree the builder passed?</div>
+        <div className="inline-flex rounded-lg border border-[#E3E3E3] overflow-hidden">
+          {OUTCOME_OPTS.map(([v, label]) => {
+            const on = outcome === v;
+            const bg = on ? (v === 'disagree' ? '#C73A3A' : v === 'unsure' ? '#94a3b8' : BRAND) : undefined;
+            return (
+              <button key={v} onClick={() => setOutcome(v)} className={`px-4 py-1.5 text-xs font-semibold ${on ? 'text-white' : 'text-slate-600 bg-white hover:bg-[#F7F7F9]'}`} style={on ? { backgroundColor: bg } : undefined}>{label}</button>
+            );
+          })}
+        </div>
+      </div>
+
+      {assessments.length > 0 && (
+        <div className="mb-4">
+          <div className="text-[11px] font-medium text-slate-500 mb-1.5">Per-skill level — correct the coach where it&apos;s off</div>
+          <div className="space-y-1.5">
+            {assessments.map((a) => (
+              <div key={a.skill_slug} className="flex items-center gap-2 text-xs">
+                <span className="flex-1 text-slate-700 capitalize truncate">{(a.skill_slug || '—').replace(/-/g, ' ')}</span>
+                <span className="text-[11px] text-slate-400 font-mono">coach {Number.isInteger(a.level) ? `L${a.level}` : 'N/A'}</span>
+                <select
+                  value={skillLevels[a.skill_slug] ?? 'na'}
+                  onChange={(e) => setSkillLevels((p) => ({ ...p, [a.skill_slug]: e.target.value }))}
+                  className={`rounded-md border px-2 py-1 text-xs font-mono ${skillLevels[a.skill_slug] !== (Number.isInteger(a.level) ? String(a.level) : 'na') ? 'border-rose-400 text-rose-600' : 'border-[#E3E3E3] text-slate-700'}`}
+                >
+                  {LEVEL_OPTS.map((o) => <option key={o} value={o}>{o === 'na' ? 'N/A' : `L${o}`}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {dimensionKeys.length > 0 && (
+        <div className="mb-4">
+          <div className="text-[11px] font-medium text-slate-500 mb-1.5">Did the coach do each of these well? (your call, vs the judge)</div>
+          <div className="space-y-1.5">
+            {dimensionKeys.map((d) => (
+              <div key={d} className="flex items-center gap-2 text-xs">
+                <span className="flex-1 text-slate-700">{DIMENSION_LABELS[d] || d}</span>
+                <div className="inline-flex rounded-md border border-[#E3E3E3] overflow-hidden">
+                  <button onClick={() => setDimRatings((p) => ({ ...p, [d]: true }))} className={`px-2.5 py-1 text-[11px] font-semibold ${dimRatings[d] === true ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-slate-500 hover:bg-[#F7F7F9]'}`}>👍 Yes</button>
+                  <button onClick={() => setDimRatings((p) => ({ ...p, [d]: false }))} className={`px-2.5 py-1 text-[11px] font-semibold border-l border-[#E3E3E3] ${dimRatings[d] === false ? 'bg-rose-100 text-rose-700' : 'bg-white text-slate-500 hover:bg-[#F7F7F9]'}`}>👎 No</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4">
+        <div className="text-[11px] font-medium text-slate-500 mb-1.5">Note</div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="What did the coach or judge miss?" className="w-full rounded-lg border border-[#E3E3E3] px-3 py-2 text-xs text-[#1E1E1E] resize-y" />
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1.5">
+        {FLAG_OPTS.map(([v, label]) => (
+          <label key={v} className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={flags.includes(v)} onChange={() => toggleFlag(v)} className="accent-[#4242EA]" />
+            {label}
+          </label>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button onClick={save} disabled={saving} className="text-xs font-semibold text-white rounded-lg px-4 py-2 disabled:opacity-50" style={{ backgroundColor: BRAND }}>
+          {saving ? 'Saving…' : 'Save review'}
+        </button>
+        {saved && <span className="text-xs text-emerald-600 font-medium">✓ Saved</span>}
+      </div>
+    </div>
+  );
+};
+
 const CaseDetail = ({ token, caseId, onViewTimeline }) => {
   const [c, setC] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -226,6 +357,8 @@ const CaseDetail = ({ token, caseId, onViewTimeline }) => {
           </div>
         </div>
       </div>
+
+      <AnnotationPanel token={token} caseId={caseId} coachGrade={c.coachGrade} dimensionKeys={Object.keys(dims)} initial={c.myAnnotation} />
     </div>
   );
 };
