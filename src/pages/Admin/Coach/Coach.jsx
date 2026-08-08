@@ -11,6 +11,7 @@ import GoldenDataset from '../GoldenDataset/GoldenDataset';
 import TeachingLab from '../TeachingLab/TeachingLab';
 import LearnerProfiles from '../LearnerProfiles/LearnerProfiles';
 import CohortInsights from '../CohortInsights/CohortInsights';
+import JudgeAlignment from '../JudgeAlignment/JudgeAlignment';
 
 // Every tab keeps the SAME font-weight (font-medium) in every state — the
 // active tab is distinguished by the purple fill, not by going bold. Changing
@@ -39,6 +40,7 @@ const Coach = () => {
   const canRuns = canCoach;
   const canEvals = canCoach;
   const canInsights = canCoach;
+  const canAlignment = canCoach;
   const canProfiles = canCoach;
   const canSnapshot = canCoach;
   const canGolden = canCoach;
@@ -50,6 +52,7 @@ const Coach = () => {
   // otherwise pick the first tab they can access.
   const resolveInitialTab = () => {
     if (initialTabParam === 'evals' && canEvals) return 'evals';
+    if (initialTabParam === 'alignment' && canAlignment) return 'alignment';
     if (initialTabParam === 'insights' && canInsights) return 'insights';
     if (initialTabParam === 'profiles' && canProfiles) return 'profiles';
     if (initialTabParam === 'snapshot' && canSnapshot) return 'snapshot';
@@ -112,6 +115,7 @@ const Coach = () => {
           <TabsList className="inline-flex gap-1 h-auto bg-transparent p-0">
             {canRuns && <TabsTrigger value="runs" className={TAB_TRIGGER_CLASS}>Coach Runs</TabsTrigger>}
             {canEvals && <TabsTrigger value="evals" className={TAB_TRIGGER_CLASS}>Coach Evals</TabsTrigger>}
+            {canAlignment && <TabsTrigger value="alignment" className={TAB_TRIGGER_CLASS}>Judge Alignment</TabsTrigger>}
             {canInsights && <TabsTrigger value="insights" className={TAB_TRIGGER_CLASS}>Cohort Insights</TabsTrigger>}
             {/* Profiles tab hidden for now (component kept, see TabsContent below) */}
             {canSnapshot && <TabsTrigger value="snapshot" className={TAB_TRIGGER_CLASS}>Builder Snapshot</TabsTrigger>}
@@ -129,6 +133,11 @@ const Coach = () => {
         {canEvals && (
           <TabsContent value="evals" className="flex-1 min-h-0 mt-0 focus-visible:outline-none">
             <CoachEvals embedded onViewTimeline={openRunTimeline} />
+          </TabsContent>
+        )}
+        {canAlignment && (
+          <TabsContent value="alignment" className="flex-1 min-h-0 mt-0 focus-visible:outline-none">
+            <JudgeAlignment />
           </TabsContent>
         )}
         {canInsights && (
